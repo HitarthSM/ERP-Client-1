@@ -36,13 +36,13 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
           {!collapsed && <span className="font-bold text-lg text-primary whitespace-nowrap overflow-hidden truncate">ERP System</span>}
         </div>
         {!collapsed && (
-          <button onClick={onToggle} className="p-1 rounded-md hover:bg-accent hover:text-accent-foreground flex-shrink-0">
+          <button onClick={onToggle} aria-label="Collapse sidebar" className="p-1 rounded-md hover:bg-accent hover:text-accent-foreground flex-shrink-0">
             <ChevronLeft size={20} />
           </button>
         )}
       </div>
       {collapsed && (
-        <button onClick={onToggle} className="mx-auto mt-2 p-1 rounded-md hover:bg-accent hover:text-accent-foreground">
+        <button onClick={onToggle} aria-label="Expand sidebar" className="mx-auto mt-2 p-1 rounded-md hover:bg-accent hover:text-accent-foreground">
           <ChevronRight size={20} />
         </button>
       )}

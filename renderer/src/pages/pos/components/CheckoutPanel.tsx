@@ -1,6 +1,17 @@
 import { useState } from "react";
-import { Mail, Printer, Receipt, PackagePlus, User } from "lucide-react";
-import type { ClerkUser, Customer, SaleType } from "../../../types";
+import { ExternalLink, Mail, Printer, Receipt, PackagePlus, User } from "lucide-react";
+import type { ClerkUser, CreditStatus, Customer, SaleType } from "../../../types";
+
+function CreditDot({ status }: { status?: CreditStatus }) {
+  const cls: Record<string, string> = {
+    over: 'bg-red-500', warning: 'bg-amber-500', available: 'bg-green-500', none: 'bg-muted-foreground/30',
+  };
+  const labels: Record<string, string> = {
+    over: 'Over limit', warning: 'Nearing limit', available: 'Credit available', none: 'No credit limit',
+  };
+  const k = status ?? 'none';
+  return <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${cls[k]}`} title={labels[k]} />;
+}
 import { formatEntityLabel } from "../../../lib/entityLabel";
 import { CustomerFormDrawer } from "../../../components/CustomerFormDrawer";
 import type { DeliveryInfo, PosPayMethod } from "../checkout";
@@ -79,6 +90,9 @@ export interface CheckoutPanelProps {
   hasReceipt: boolean;
   accentBtnCls: string;
   hasStockIssues?: boolean;
+  onOpenCustomerDrawer?: () => void;
+  lastBillDate?: string;
+  lastBillTotal?: number;
 }
 
 export function CheckoutPanel({
@@ -145,6 +159,9 @@ export function CheckoutPanel({
   hasReceipt,
   accentBtnCls,
   hasStockIssues,
+  onOpenCustomerDrawer,
+  lastBillDate,
+  lastBillTotal,
 }: CheckoutPanelProps) {
   const [facilitatorSectionOpen, setFacilitatorSectionOpen] = useState(false);
 
@@ -327,10 +344,18 @@ export function CheckoutPanel({
                       className="block w-full px-3 py-2 text-left text-sm hover:bg-muted border-b border-border last:border-0"
                       onClick={() => onCustomerSelect(c)}
                     >
-                      <span className="font-medium">{c.name || "Unnamed"}</span>
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <CreditDot status={c.creditStatus} />
+                        {c.name || "Unnamed"}
+                      </span>
                       {c.phone ? (
                         <span className="text-xs text-muted-foreground ml-2">{c.phone}</span>
                       ) : null}
+                      {c.creditBalance != null && c.creditLimit != null && c.creditLimit > 0 && (
+                        <span className="text-[10px] text-muted-foreground ml-2 tabular-nums">
+                          Balance: {c.creditBalance.toFixed(2)} / {c.creditLimit.toFixed(2)}
+                        </span>
+                      )}
                     </button>
                   ))}
                   {customerSearchItems.length === 0 && (
@@ -356,7 +381,8 @@ export function CheckoutPanel({
           )}
           {mode === "sales" && customerId && (
             <div className="mt-1.5 flex items-center justify-between gap-2">
-              <p className="text-[10px] text-muted-foreground truncate">
+              <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                <CreditDot status={selectedCustomer?.creditStatus} />
                 Linked: {formatEntityLabel({ name: customerInfo, id: customerId })}
                 {(customerType || selectedCustomer?.customerType) && (
                   <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 font-semibold uppercase tracking-wide text-[9px] text-foreground">
@@ -364,13 +390,24 @@ export function CheckoutPanel({
                   </span>
                 )}
               </p>
-              <button
-                type="button"
-                className="text-[10px] text-muted-foreground underline"
-                onClick={onClearCustomer}
-              >
-                Clear
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {onOpenCustomerDrawer && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-primary flex items-center gap-0.5 hover:underline"
+                    onClick={onOpenCustomerDrawer}
+                  >
+                    <ExternalLink size={9} /> Profile
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="text-[10px] text-muted-foreground underline"
+                  onClick={onClearCustomer}
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           )}
           {mode === "sales" && saleType === "credit" && !customerId && (
@@ -382,6 +419,18 @@ export function CheckoutPanel({
             <p className="mt-1.5 text-[10px] font-medium text-destructive">
               Customer has no credit limit — set one on the Customers page before completing
             </p>
+          )}
+          {mode === "sales" && saleType === "credit" && customerId && selectedCustomer &&
+            (selectedCustomer.creditStatus === 'warning' || selectedCustomer.creditStatus === 'over') && (
+            <div className={`mt-2 rounded-lg border px-3 py-2 text-[11px] font-medium ${
+              selectedCustomer.creditStatus === 'over'
+                ? 'border-red-300/60 bg-red-500/10 text-red-700 dark:text-red-400'
+                : 'border-amber-300/60 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+            }`}>
+              {selectedCustomer.creditStatus === 'over'
+                ? '⚠ Customer is over credit limit'
+                : '⚠ Customer is nearing credit limit (≥90%)'}
+            </div>
           )}
           {mode === "sales" && saleType === "credit" && customerId && selectedCustomer && (
             <div className="mt-2 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 space-y-1 text-[11px]">

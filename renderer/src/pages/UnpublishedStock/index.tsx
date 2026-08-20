@@ -10,9 +10,11 @@ import {
   Copy,
   HelpCircle,
   Loader2,
+  MousePointerClick,
   PackagePlus,
   Send,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { GuideModal, type GuideStep } from '../../components/GuideModal';
 import { ResourceSelect } from '../../components/ResourceSelect';
@@ -394,6 +396,16 @@ export default function UnpublishedStockPage() {
               )}
             </div>
 
+            {/* Click-to-publish hint — shown when records exist and none is selected */}
+            {!listLoading && stagingList && stagingList.length > 0 && !activeId && (
+              <div className="flex items-center gap-2 border-b border-border bg-blue-500/5 px-5 py-2">
+                <MousePointerClick size={13} className="shrink-0 text-blue-500" />
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  Click a row below to select it and open publishing options
+                </p>
+              </div>
+            )}
+
             {/* List body */}
             <div className="max-h-72 overflow-y-auto">
               {listLoading ? (
@@ -456,10 +468,18 @@ export default function UnpublishedStockPage() {
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-500/15 text-green-600 dark:text-green-400">
                   <Send size={16} />
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-semibold text-foreground">Step 3 — Publish to Inventory</p>
                   <p className="text-xs text-muted-foreground">Review and publish the staged stock</p>
                 </div>
+                <button
+                  type="button"
+                  title="Close"
+                  onClick={() => { setActiveId(undefined); setPublishForm(EMPTY_PUBLISH); setShowHistory(false); }}
+                  className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X size={15} />
+                </button>
               </div>
 
               {recordLoading ? (

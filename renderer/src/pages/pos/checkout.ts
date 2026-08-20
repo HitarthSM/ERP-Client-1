@@ -102,6 +102,8 @@ export interface SalesCheckoutInput {
   facilitatorName?: string;
   commissionPct?: number;
   existingBillId?: string;
+  orderReference?: string;
+  fulfillmentStores?: string[];
 }
 
 export interface PurchaseCheckoutInput {
@@ -350,6 +352,12 @@ export async function createDraftSale(input: SalesCheckoutInput): Promise<DraftS
   if (input.storeName) notesParts.push(`Store: ${input.storeName}`);
   if (input.paymentReference?.trim()) {
     notesParts.push(`Pay ref: ${input.paymentReference.trim()}`);
+  }
+  if (input.orderReference?.trim()) {
+    notesParts.push(`Ref: ${input.orderReference.trim()}`);
+  }
+  if (input.fulfillmentStores?.length) {
+    notesParts.push(`Fulfillment: ${input.fulfillmentStores.join(', ')}`);
   }
   if (input.delivery?.driverName) {
     notesParts.push(`Driver: ${input.delivery.driverName}`);

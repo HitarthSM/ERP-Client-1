@@ -5,10 +5,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type {
   Organization, Category, Product, Supplier, PurchaseOrder, Bill, PaymentTransaction,
-  Notification, ItemReturn, ReportGenerationLog, Order, Invoice, Customer, Expense, PurchaseItem,
+  Notification, ItemReturn, ReportGenerationLog, Order, Invoice, Customer, CustomerCreditTransaction, Expense, PurchaseItem,
   ActivityLog, Role, UserRole, PlatformConfiguration, PlatformUser, Location,
   ProductImage, ProductImageUploadUrl, ProductSupplier,
-  InventoryItem, StockMovement, StockMovementOp, StockOperationBody, StockTransfer,
+  InventoryItem, StockMovement, StockMovementOp, StockOperationBody, StockTransfer, StockTransferRequest,
   UnpublishedStock, UnpublishedStockMovement, ProductLog, PaginatedResponse,
   BillStatus, PaymentMethod, CreateBillItemInput, UpdateBillInput,
   SaleType, CustomerType, PaymentTiming,
@@ -238,6 +238,44 @@ export const Customers = {
       onError: (error: Error) => toast.error(error.message || 'Failed to update customer'),
     });
   },
+  useGetBills(customerId: string | undefined, page = 1) {
+    return useQuery({
+      queryKey: ['customers', customerId, 'bills', page],
+      queryFn: () =>
+        get<PaginatedResponse<Bill>>(`/api/v1/customers/${customerId as string}/bills`, {
+          $page: page,
+          $perPage: 10,
+        }),
+      enabled: !!customerId,
+    });
+  },
+  useGetCreditTransactions(customerId: string | undefined, page = 1) {
+    return useQuery({
+      queryKey: ['customers', customerId, 'credit-transactions', page],
+      queryFn: () =>
+        get<PaginatedResponse<CustomerCreditTransaction>>(
+          `/api/v1/customers/${customerId as string}/credit-transactions`,
+          { $page: page, $perPage: 20 },
+        ),
+      enabled: !!customerId,
+    });
+  },
+  useRecordCreditTransaction(customerId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (body: {
+        type: 'payment' | 'adjustment';
+        amount: number;
+        paymentMethod?: string;
+        note?: string;
+      }) => post<Customer>(`/api/v1/customers/${customerId as string}/credit-transactions`, body),
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['customers', customerId] });
+        queryClient.invalidateQueries({ queryKey: ['customers', customerId, 'credit-transactions'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to record transaction'),
+    });
+  },
 };
 
 export const CreditApprovals = {
@@ -410,6 +448,19 @@ export function useListRoles() {
 
 export const UserRoles = createCreateOnlyResource<UserRole>('/api/v1/user-roles', 'user-roles', 'User role');
 
+export function useUpdateUserRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<UserRole> }) =>
+      put<UserRole>(`/api/v1/user-roles/${id}`, body),
+    onSuccess: () => {
+      toast.success('User role updated');
+      queryClient.invalidateQueries({ queryKey: ['user-roles'] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to update user role'),
+  });
+}
+
 export function useListUserRoles() {
   return useQuery<UserRole[]>({
     queryKey: ['user-roles', 'list'],
@@ -472,6 +523,73 @@ export const StockTransfers = {
         queryClient.invalidateQueries({ queryKey: ['stock-transfers'] });
       },
       onError: (error: Error) => toast.error(error.message || 'Failed to create stock transfer'),
+    });
+  },
+};
+
+export const StockTransferRequests = {
+  useListMine(locationId: string | undefined) {
+    return useQuery({
+      queryKey: ['stock-transfer-requests', 'mine', locationId],
+      queryFn: () => get<StockTransferRequest[]>('/api/v1/stock-transfer-requests/mine', { locationId }),
+      enabled: !!locationId,
+    });
+  },
+  useListOpen(locationId: string | undefined) {
+    return useQuery({
+      queryKey: ['stock-transfer-requests', 'open', locationId],
+      queryFn: () => get<StockTransferRequest[]>('/api/v1/stock-transfer-requests/open', { locationId }),
+      enabled: !!locationId,
+    });
+  },
+  useRaise() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (body: { requestingLocationId: string; productId: string; variantId?: string; quantityRequested: number }) =>
+        post<StockTransferRequest>('/api/v1/stock-transfer-requests', body),
+      onSuccess: () => {
+        toast.success('Stock request raised');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to raise request'),
+    });
+  },
+  useAccept() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: ({ id, acceptingLocationId }: { id: string; acceptingLocationId: string }) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/accept`, { acceptingLocationId }),
+      onSuccess: () => {
+        toast.success('Request accepted — stock deducted from your store');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to accept request'),
+    });
+  },
+  useClaim() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (id: string) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/claim`, {}),
+      onSuccess: () => {
+        toast.success('Marked as received — stock added to your inventory');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to claim request'),
+    });
+  },
+  useCancel() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (id: string) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/cancel`, {}),
+      onSuccess: () => {
+        toast.success('Request cancelled');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to cancel request'),
     });
   },
 };
@@ -844,7 +962,7 @@ export const ClerkUsers = {
     });
   },
 
-  /** POST /api/v1/users/clerk/invite */
+  /** POST /api/v1/users/clerk/invite — body: { email, roleId, locationId?, redirectUrl? } */
   useInvite() {
     const queryClient = useQueryClient();
     return useMutation({

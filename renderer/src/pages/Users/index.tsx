@@ -142,7 +142,7 @@ export default function UsersPage(): React.JSX.Element {
 
   const extraRowActions = useCallback(
     (row: ClerkUser): ExtraAction[] => [
-      { label: 'Edit Roles', icon: <Tags size={14} />, onSelect: () => setRolesTarget(row) },
+      { label: 'Clerk labels (not app access)', icon: <Tags size={14} />, onSelect: () => setRolesTarget(row) },
       { label: 'Assign to Org', icon: <Building2 size={14} />, onSelect: () => setAssignTarget(row) },
       row.banned
         ? { label: 'Unban User', icon: <ShieldCheck size={14} />, onSelect: () => setUnbanTarget(row) }

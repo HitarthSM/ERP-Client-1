@@ -23,7 +23,4 @@ export const AuthService = {
       '/api/v1/auth/organizations',
       payload,
     ),
-
-  inviteMember: (payload: { email: string; roleId: string }) =>
-    post<{ membershipId: string; status: string }>('/api/v1/auth/invite', payload),
 };

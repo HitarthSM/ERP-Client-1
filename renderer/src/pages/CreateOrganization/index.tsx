@@ -21,8 +21,9 @@ export default function CreateOrganization() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    let clerkOrg: Awaited<ReturnType<typeof clerk.createOrganization>> | undefined;
     try {
-      const clerkOrg = await clerk.createOrganization({ name: name.trim() });
+      clerkOrg = await clerk.createOrganization({ name: name.trim() });
       await clerk.setActive({ organization: clerkOrg.id });
       await AuthService.createOrganization({
         name: name.trim(),
@@ -33,6 +34,8 @@ export default function CreateOrganization() {
       toast.success('Organization created');
       navigate('/');
     } catch (error: any) {
+      // Backend failed after the Clerk org was created — clean it up so retry doesn't orphan/duplicate it.
+      if (clerkOrg) await clerkOrg.destroy().catch(() => {});
       toast.error(error.message || 'Failed to create organization');
     } finally {
       setLoading(false);

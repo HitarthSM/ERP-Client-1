@@ -474,6 +474,28 @@ export interface StockTransfer {
   items?: StockTransferItem[];
 }
 
+export interface StockTransferRequest {
+  id: string;
+  organizationId: string;
+  requestingLocationId: string;
+  requestingUserId?: string;
+  productId: string;
+  variantId?: string;
+  quantityRequested: number;
+  status: string;
+  acceptedByLocationId?: string;
+  acceptedByUserId?: string;
+  acceptedAt?: string;
+  claimedAt?: string;
+  cancelledByUserId?: string;
+  cancelledAt?: string;
+  fulfillmentTransferId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  canFulfill?: boolean;
+  availableStock?: number;
+}
+
 // Verified 2026-07-26 against core-apis's OrderResponse/CreateOrderRequest source
 // directly — camelCase, matches the entity well. OrderEntity has no organizationId
 // column (tenancy flows through locationId -> location -> org). The real blocker for
@@ -505,6 +527,8 @@ export interface Invoice {
 }
 
 // core-apis customers: create sets organizationId from auth/fallback; search/PATCH/DELETE supported.
+export type CreditStatus = 'none' | 'available' | 'warning' | 'over';
+
 export interface Customer {
   id: string;
   organizationId?: string;
@@ -517,8 +541,23 @@ export interface Customer {
   customerType?: CustomerType | string | null;
   discountPercent?: number | null;
   skipOverLimitApproval?: boolean | null;
+  creditStatus?: CreditStatus;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface CustomerCreditTransaction {
+  id: string;
+  customerId: string;
+  type: 'credit_sale' | 'payment' | 'adjustment';
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  billId?: string | null;
+  paymentMethod?: string | null;
+  note?: string | null;
+  performedById?: string | null;
+  createdAt: string;
 }
 
 export interface QuickCharge {
@@ -624,7 +663,7 @@ export interface ActivityLog {
 // values, unique) — free text will fail. organizationId/permissions are required by
 // CreateRoleRequest validation but RoleEntity has no matching columns, so the backend
 // silently discards them after accepting the request.
-export const ROLE_NAMES = ['super_admin', 'org_admin', 'store_manager', 'store_staff'] as const;
+export const ROLE_NAMES = ['super_admin', 'org_admin', 'org_manager', 'store_manager', 'store_staff'] as const;
 
 export interface Role {
   id: string;
@@ -709,7 +748,9 @@ export interface ClerkUserRolesResponse {
 
 export interface InviteUserPayload {
   email: string;
-  roles?: string[];
+  roleId: string;
+  organizationId?: string;
+  locationId?: string;
   redirectUrl?: string;
 }
 
@@ -931,9 +972,3 @@ export interface StockByLocationPoint {
   valuation: number;
 }
 
-export * from './features/auth/types';
-export * from './features/inventory/types';
-export * from './features/purchasing/types';
-export * from './features/sales/types';
-export * from './features/fleet/types';
-export * from './features/core/types';

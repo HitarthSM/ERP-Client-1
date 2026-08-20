@@ -9,6 +9,7 @@ import { isFullPageAccessRole } from '../../lib/page-access';
 const ROLES = [
   { key: 'super_admin',    label: 'Super Admin' },
   { key: 'org_admin',     label: 'Org Admin' },
+  { key: 'org_manager',   label: 'Org Manager' },
   { key: 'store_manager', label: 'Store Manager' },
   { key: 'store_staff',   label: 'Store Staff' },
 ];

@@ -3,6 +3,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Notifications } from '../../api';
+import { useCentrifugo } from '../../hooks/useCentrifugo';
 
 function NotificationBell() {
   const { data } = Notifications.useUnreadCount();
@@ -30,6 +31,8 @@ export default function Topbar() {
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  useCentrifugo(user);
 
   const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'User';
   const role = (user?.roles?.[0] || 'member').replace(/_/g, ' ');

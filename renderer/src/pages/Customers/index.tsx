@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DataTable, Column } from '../../components/DataTable';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { CustomerFormDrawer } from '../../components/CustomerFormDrawer';
@@ -7,8 +8,32 @@ import { Customers, Organizations } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import { formatEntityLabel } from '../../lib/entityLabel';
 import { loadErrorMessage } from '../../lib/api-error';
+import type { CreditStatus } from '../../types';
+
+function CreditStatusDot({ status }: { status?: CreditStatus }) {
+  const cls: Record<string, string> = {
+    over: 'bg-red-500',
+    warning: 'bg-amber-500',
+    available: 'bg-green-500',
+    none: 'bg-muted-foreground/30',
+  };
+  const labels: Record<string, string> = {
+    over: 'Over limit',
+    warning: 'Nearing limit',
+    available: 'Credit available',
+    none: 'No credit limit',
+  };
+  const key = status ?? 'none';
+  return (
+    <span
+      className={`inline-block w-2.5 h-2.5 rounded-full ${cls[key]}`}
+      title={labels[key]}
+    />
+  );
+}
 
 export default function CustomersPage() {
+  const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [viewRow, setViewRow] = useState<Customer | null>(null);
@@ -44,9 +69,22 @@ export default function CustomersPage() {
 
   const columns: Column<Customer>[] = [
     {
+      key: 'creditStatus' as any,
+      label: '',
+      render: (row) => <CreditStatusDot status={row.creditStatus} />,
+    },
+    {
       key: 'name',
       label: 'Name',
-      render: (row) => row.name || '—',
+      render: (row) => (
+        <button
+          type="button"
+          className="font-medium text-primary hover:underline text-left"
+          onClick={(e) => { e.stopPropagation(); navigate(`/customers/${row.id}`); }}
+        >
+          {row.name || '—'}
+        </button>
+      ),
     },
     {
       key: 'phone',

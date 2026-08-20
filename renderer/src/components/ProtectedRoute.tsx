@@ -15,7 +15,8 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  if (!user.organization) {
+  const isSuperAdmin = user.roles?.includes('super_admin');
+  if (!user.organization && !isSuperAdmin) {
     return <Navigate to="/onboarding/create-org" replace />;
   }
 
