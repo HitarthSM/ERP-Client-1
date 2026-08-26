@@ -9,6 +9,7 @@ import { useDashboardScope } from '../../hooks/useDashboardScope';
 
 interface DashboardShellProps {
   title: string;
+  actions?: ReactNode;
   children: (ctx: {
     period: DashboardPeriodRange;
     locationId?: string;
@@ -16,14 +17,17 @@ interface DashboardShellProps {
   }) => ReactNode;
 }
 
-export default function DashboardShell({ title, children }: DashboardShellProps) {
+export default function DashboardShell({ title, actions, children }: DashboardShellProps) {
   const [period, setPeriod] = useState<DashboardPeriodRange>(() => resolveDashboardPeriod('month'));
   const scope = useDashboardScope();
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
+          {actions}
+        </div>
         <div className="flex flex-col gap-2 sm:items-end">
           <DashboardPeriodFilter value={period} onChange={setPeriod} />
           <DashboardLocationFilter

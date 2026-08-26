@@ -1,52 +1,51 @@
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  ComposedChart, Area, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
-import { DollarSign, ShoppingCart, AlertCircle, TrendingUp, Clock } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { Analytics } from '../../api';
-import DashboardShell, { CHART_COLORS } from '../../components/dashboard/DashboardShell';
-import PermissionGatedChart from '../../components/dashboard/PermissionGatedChart';
-import { DASHBOARD_PERMISSIONS } from '../../config/dashboard-permissions';
+import { Plus } from 'lucide-react';
+import { Analytics, PurchaseOrders, Suppliers } from '../../api';
+import DashboardShell from '../../components/dashboard/DashboardShell';
 import type { DashboardPeriodRange } from '../../components/dashboard/DashboardPeriodFilter';
 import { formatPeriodAxisLabel } from '../../lib/dashboard-period';
 import { formatMoney } from '../../lib/format-money';
+import { formatEntityLabel } from '../../lib/entityLabel';
+import { cn } from '../../lib/utils';
+
+const PURCHASE_BLUE = '#3b82f6';
+const DIST_COLORS = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#8b5cf6'];
 
 function toParams(period: DashboardPeriodRange, locationId?: string) {
   return { period: period.preset, from: period.from, to: period.to, locationId };
 }
 
-function KpiCard({
-  label, value, sub, icon: Icon, color,
+function ChartCard({
+  title, subtitle, children, className, headerRight,
 }: {
-  label: string; value: string; sub?: string;
-  icon: React.ComponentType<{ size?: number }>; color: string;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  className?: string;
+  headerRight?: React.ReactNode;
 }) {
   return (
-    <div className="p-4 bg-card border border-border rounded-xl shadow-sm">
-      <div className="flex items-center justify-between pb-2">
-        <h3 className="tracking-tight text-sm font-medium text-muted-foreground">{label}</h3>
-        <div className={`p-2 rounded-full ${color}`}><Icon size={16} /></div>
+    <div className={cn('bg-card rounded-xl border border-border p-4 shadow-sm', className)}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-semibold text-sm">{title}</h3>
+          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+        </div>
+        {headerRight}
       </div>
-      <div className="text-2xl font-bold">{value}</div>
-      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+      {children}
     </div>
   );
 }
 
-function ExceptionBar({ label, count, color, to }: { label: string; count: number; color: string; to: string }) {
-  const max = Math.max(count, 1);
+function ChartEmpty({ label }: { label: string }) {
   return (
-    <Link to={to} className="block group">
-      <div className="flex justify-between text-xs mb-1">
-        <span className="font-medium group-hover:text-primary">{label}</span>
-        <span className="text-muted-foreground">{count}</span>
-      </div>
-      <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, (count / max) * 100)}%`, background: color }} />
-      </div>
-    </Link>
+    <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">{label}</div>
   );
 }
 
@@ -55,138 +54,235 @@ function PurchaseDashboardBody({
 }: { period: DashboardPeriodRange; locationId?: string; currencyCode: string }) {
   const params = toParams(period, locationId);
   const fmt = (n: number) => formatMoney(n, currencyCode);
-  const ld = (v: boolean, s: string) => (v ? '…' : s);
 
-  const { data: summary, isLoading: sLoading } = Analytics.usePurchaseSummary(params);
   const { data: trend, isLoading: tLoading } = Analytics.usePurchaseTrend(params);
   const { data: byCategory, isLoading: cLoading } = Analytics.usePurchaseByCategory(params);
-  const { data: exceptions, isLoading: eLoading } = Analytics.usePurchaseExceptions({ locationId });
-  const { data: supplierPrices, isLoading: spLoading } = Analytics.useSupplierPriceComparison(params);
+  const { data: recentPos, isLoading: poLoading } = PurchaseOrders.useSearch({ limit: 8 });
+  const { data: draftPos, isLoading: draftLoading } = PurchaseOrders.useSearch({
+    limit: 10,
+    filters: { status: 'draft' },
+  });
+  const { data: suppliers = [] } = Suppliers.useList();
 
-  const categoryPie = (byCategory ?? []).filter((c) => c.value > 0);
-
-  const supplierBars = useMemo(() => {
-    return (supplierPrices ?? []).map((row) => ({
-      label: `${row.productName} · ${row.supplierName}`,
-      avgUnitCost: row.avgUnitCost,
-    }));
-  }, [supplierPrices]);
-
-  const maxException = Math.max(
-    exceptions?.pending ?? 0,
-    exceptions?.approvalPending ?? 0,
-    exceptions?.priceIncreased ?? 0,
-    1,
+  const supplierMap = useMemo(
+    () => Object.fromEntries(suppliers.map((s) => [s.id, s.name])),
+    [suppliers],
   );
+
+  const purchaseInfo = useMemo(() => {
+    return (recentPos?.items ?? []).map((po) => {
+      const total = po.totalAmount ?? 0;
+      return {
+        id: po.id,
+        supplier: po.supplierId ? (supplierMap[po.supplierId] ?? formatEntityLabel({ id: po.supplierId })) : '—',
+        purchaseId: po.poNumber ?? formatEntityLabel({ id: po.id }),
+        price: total,
+        total,
+      };
+    });
+  }, [recentPos, supplierMap]);
+
+  const pendingOrders = useMemo(() => {
+    return (draftPos?.items ?? []).map((po) => ({
+      id: po.id,
+      supplier: po.supplierId ? (supplierMap[po.supplierId] ?? formatEntityLabel({ id: po.supplierId })) : '—',
+      purchaseId: po.poNumber ?? formatEntityLabel({ id: po.id }),
+      total: po.totalAmount ?? 0,
+      status: po.status ?? 'draft',
+    }));
+  }, [draftPos, supplierMap]);
+
+  const distribution = (byCategory ?? []).filter((c) => c.value > 0);
+
+  const periodLabel = period.preset === 'today' ? 'Today'
+    : period.preset === '7d' ? 'Last 7 Days'
+      : period.preset === 'month' ? 'This Month'
+        : period.preset === 'year' ? 'This Year'
+          : 'Custom Range';
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Spend" icon={DollarSign} color="bg-orange-500/10 text-orange-500"
-          value={ld(sLoading, fmt(summary?.spendThisMonth ?? 0))} sub="received POs in period" />
-        <KpiCard label="Outstanding POs" icon={AlertCircle} color="bg-amber-500/10 text-amber-500"
-          value={ld(sLoading, String(summary?.outstandingPos ?? 0))} />
-        <KpiCard label="Avg PO Value" icon={TrendingUp} color="bg-blue-500/10 text-blue-500"
-          value={ld(sLoading, fmt(summary?.avgPoValue ?? 0))} />
-        <KpiCard label="Active Suppliers" icon={ShoppingCart} color="bg-teal-500/10 text-teal-500"
-          value={ld(sLoading, String(summary?.supplierCount ?? 0))} />
-      </div>
+      <ChartCard
+        title="Purchase Trend"
+        subtitle="Day · Date · Branch"
+        headerRight={(
+          <span className="text-xs font-medium px-2.5 py-1 rounded-md border border-border bg-muted/50 text-muted-foreground">
+            {periodLabel}
+          </span>
+        )}
+      >
+        {tLoading ? (
+          <ChartEmpty label="Loading…" />
+        ) : (trend ?? []).length === 0 ? (
+          <ChartEmpty label="No purchase data in period" />
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart data={trend ?? []} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="purchaseTrendFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={PURCHASE_BLUE} stopOpacity={0.22} />
+                  <stop offset="95%" stopColor={PURCHASE_BLUE} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tickFormatter={formatPeriodAxisLabel}
+                tick={{ fontSize: 11 }}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                tickFormatter={(v) => fmt(Number(v))}
+                width={72}
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip
+                formatter={(v) => [fmt(Number(v)), 'Spend']}
+                labelFormatter={(label) => formatPeriodAxisLabel(String(label ?? ''))}
+              />
+              <Area type="monotone" dataKey="spend" fill="url(#purchaseTrendFill)" stroke="none" legendType="none" />
+              <Line
+                type="monotone"
+                dataKey="spend"
+                stroke={PURCHASE_BLUE}
+                strokeWidth={2.5}
+                dot={{ r: 4, fill: PURCHASE_BLUE, strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 6 }}
+                name="Spend"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
+
+      <ChartCard title="Purchase Information">
+        {poLoading ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>
+        ) : purchaseInfo.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No purchase orders yet</p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground text-xs">
+                  <th className="px-3 py-2.5 font-medium">Supplier</th>
+                  <th className="px-3 py-2.5 font-medium">Purchase ID</th>
+                  <th className="px-3 py-2.5 font-medium text-right">Price</th>
+                  <th className="px-3 py-2.5 font-medium text-right">VAT</th>
+                  <th className="px-3 py-2.5 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchaseInfo.map((row, idx) => (
+                  <tr
+                    key={row.id}
+                    className={cn(
+                      'border-b border-border/60 last:border-0',
+                      idx % 2 === 1 && 'bg-muted/30',
+                    )}
+                  >
+                    <td className="px-3 py-2.5 font-medium">{row.supplier}</td>
+                    <td className="px-3 py-2.5">
+                      <Link
+                        to={`/purchase-orders/${row.id}`}
+                        className="text-primary hover:underline font-medium"
+                      >
+                        #{row.purchaseId}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{fmt(row.price)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">—</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{fmt(row.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ChartCard>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 bg-card rounded-xl border border-border p-4 shadow-sm">
-          <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
-            <ShoppingCart size={14} className="text-orange-500" /> Purchase Spend Trend
-          </h3>
-          {tLoading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+        <ChartCard title="Purchase Pending List" className="lg:col-span-2">
+          {draftLoading ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>
+          ) : pendingOrders.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">No draft purchase orders</p>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={trend ?? []} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="poGradPurchase" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="month" tickFormatter={formatPeriodAxisLabel} tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(Number(v))} width={72} />
-                <Tooltip formatter={(v) => [fmt(Number(v)), 'Spend']} labelFormatter={(label) => formatPeriodAxisLabel(String(label ?? ''))} />
-                <Area type="monotone" dataKey="spend" stroke="#f97316" strokeWidth={2}
-                  fill="url(#poGradPurchase)" dot={{ r: 3 }} name="Spend" />
-              </AreaChart>
-            </ResponsiveContainer>
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground text-xs">
+                    <th className="px-3 py-2.5 font-medium">Supplier</th>
+                    <th className="px-3 py-2.5 font-medium">Purchase ID</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Total</th>
+                    <th className="px-3 py-2.5 font-medium text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingOrders.map((row, idx) => (
+                    <tr
+                      key={row.id}
+                      className={cn(
+                        'border-b border-border/60 last:border-0',
+                        idx % 2 === 1 && 'bg-muted/30',
+                      )}
+                    >
+                      <td className="px-3 py-2.5 font-medium">{row.supplier}</td>
+                      <td className="px-3 py-2.5">
+                        <Link
+                          to={`/purchase-orders/${row.id}`}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          #{row.purchaseId}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{fmt(row.total)}</td>
+                      <td className="px-3 py-2.5 text-right capitalize text-muted-foreground">{row.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </ChartCard>
 
-        <div className="bg-card rounded-xl border border-border p-4 shadow-sm">
-          <h3 className="font-semibold text-sm mb-4">Spend by Category</h3>
+        <ChartCard title="Purchase Distribution">
           {cLoading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
-          ) : categoryPie.length === 0 ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">No purchase data</div>
+            <ChartEmpty label="Loading…" />
+          ) : distribution.length === 0 ? (
+            <ChartEmpty label="No category data" />
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={240}>
               <PieChart>
-                <Pie data={categoryPie} dataKey="value" nameKey="categoryName" cx="50%" cy="50%"
-                  innerRadius={50} outerRadius={75}>
-                  {categoryPie.map((_, idx) => (
-                    <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                <Pie
+                  data={distribution}
+                  dataKey="value"
+                  nameKey="categoryName"
+                  cx="50%"
+                  cy="45%"
+                  innerRadius={55}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  strokeWidth={0}
+                >
+                  {distribution.map((_, idx) => (
+                    <Cell key={idx} fill={DIST_COLORS[idx % DIST_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v) => fmt(Number(v))} />
-                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                <Tooltip formatter={(v) => [fmt(Number(v)), 'Spend']} />
+                <Legend
+                  iconType="circle"
+                  iconSize={8}
+                  verticalAlign="bottom"
+                  wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                />
               </PieChart>
             </ResponsiveContainer>
           )}
-        </div>
-      </div>
-
-      <PermissionGatedChart permission={DASHBOARD_PERMISSIONS.purchase.supplierPricing}>
-        <div className="bg-card rounded-xl border border-border p-4 shadow-sm">
-          <h3 className="font-semibold text-sm mb-4">Supplier Price Comparison</h3>
-          <p className="text-xs text-muted-foreground mb-3">Products sourced from multiple suppliers in period</p>
-          {spLoading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
-          ) : supplierBars.length === 0 ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">No multi-supplier products in period</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={Math.max(200, supplierBars.length * 28)}>
-              <BarChart data={supplierBars} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
-                <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(Number(v))} />
-                <YAxis type="category" dataKey="label" width={140} tick={{ fontSize: 9 }}
-                  tickFormatter={(v: string) => v.length > 22 ? `${v.slice(0, 21)}…` : v} />
-                <Tooltip formatter={(v) => [fmt(Number(v)), 'Avg unit cost']} />
-                <Bar dataKey="avgUnitCost" radius={[0, 3, 3, 0]}>
-                  {supplierBars.map((_, idx) => (
-                    <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </PermissionGatedChart>
-
-      <div className="bg-card rounded-xl border border-border p-4 shadow-sm">
-        <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
-          <Clock size={14} className="text-amber-500" /> Purchase Exceptions
-        </h3>
-        {eLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-3 max-w-2xl">
-            <ExceptionBar label="Purchase pending" count={exceptions?.pending ?? 0} color="#3b82f6" to="/purchase-orders" />
-            <ExceptionBar label="Approval pending" count={exceptions?.approvalPending ?? 0} color="#f59e0b" to="/purchase-orders" />
-            <ExceptionBar label="Price increased" count={exceptions?.priceIncreased ?? 0} color="#ef4444" to="/purchase-orders" />
-          </div>
-        )}
-        {!eLoading && maxException > 0 && (
-          <p className="text-xs text-muted-foreground mt-3">
-            Price increased = same product + supplier with a higher unit cost vs last PO
-          </p>
-        )}
+        </ChartCard>
       </div>
     </>
   );
@@ -194,7 +290,18 @@ function PurchaseDashboardBody({
 
 export default function PurchaseDashboard() {
   return (
-    <DashboardShell title="Purchase Dashboard">
+    <DashboardShell
+      title="Purchase Dashboard"
+      actions={(
+        <Link
+          to="/pos/purchase"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+        >
+          <Plus size={16} />
+          New Purchase
+        </Link>
+      )}
+    >
       {(ctx) => <PurchaseDashboardBody {...ctx} />}
     </DashboardShell>
   );
