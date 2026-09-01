@@ -5,7 +5,7 @@ import { DataTable, type Column } from '../../components/DataTable';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { FilterDropdown } from '../../components/FilterDropdown';
 import type { ExtraAction } from '../../components/RowActionsMenu';
-import { ReportGenerationLogs } from '../../api';
+import { Locations, ReportGenerationLogs } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import type { ReportGenerationLog, GenerateReportInput } from '../../types';
 import {
@@ -85,6 +85,14 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
     return Object.keys(next).length ? next : undefined;
   }, [reportTypeFilter, periodFilter, statusFilter]);
 
+  const hasActiveFilters = Boolean(reportTypeFilter || periodFilter || statusFilter || debouncedSearch);
+
+  const { data: locations } = Locations.useList();
+  const locationNameById = useMemo(
+    () => Object.fromEntries((locations ?? []).map((loc) => [loc.id, loc.name])),
+    [locations],
+  );
+
   const { data, isLoading, error, refetch } = ReportGenerationLogs.useSearch({ page, search: debouncedSearch, filters });
   const { data: completedData } = ReportGenerationLogs.useSearch({ page: 1, limit: 1, filters: { status: 'COMPLETED' } });
   const { data: processingData } = ReportGenerationLogs.useSearch({ page: 1, limit: 1, filters: { status: 'PROCESSING' } });
@@ -136,7 +144,11 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
     {
       key: 'locationId',
       label: 'Location',
-      render: (row) => <span className="text-sm">{row.locationId ? row.locationId : 'All Locations'}</span>,
+      render: (row) => (
+        <span className="text-sm">
+          {row.locationId ? (locationNameById[row.locationId] ?? 'Unknown location') : 'All Locations'}
+        </span>
+      ),
     },
     {
       key: 'status',
@@ -151,7 +163,7 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
           ? new Date(row.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
           : '—',
     },
-  ], []);
+  ], [locationNameById]);
 
   const extraRowActions = useMemo(() => (row: ReportGenerationLog): ExtraAction[] => {
     const actions: ExtraAction[] = [];
@@ -230,7 +242,11 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
       <div className="min-h-0 flex-1">
         <DataTable
           title="Generated Reports"
-          description="All report generation jobs for this organisation"
+          description={
+            hasActiveFilters
+              ? 'Filtered report generation jobs for this organisation'
+              : 'All report generation jobs for this organisation'
+          }
           columns={columns}
           rows={data?.items ?? []}
           total={data?.total ?? 0}
@@ -239,13 +255,18 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
           error={error ? String(error) : null}
           onPageChange={setPage}
           onSearchChange={(s) => { setSearch(s); setPage(1); }}
-          searchPlaceholder="Search reports…"
+          searchPlaceholder="Search by report name…"
           toolbar={toolbar}
           onRefetch={() => void refetch()}
           isAdmin
           onView={undefined}
           extraRowActions={extraRowActions}
           onDelete={(row) => setDeleteTarget(row)}
+          footerNote={
+            hasActiveFilters && !isLoading && (data?.total ?? 0) === 0
+              ? 'No reports match the current filters. Try clearing filters or generate a new report.'
+              : undefined
+          }
         />
       </div>
 
@@ -253,7 +274,12 @@ export default function ReportGenerationLogsPage(): React.ReactElement {
         open={generateOpen}
         onClose={() => setGenerateOpen(false)}
         onGenerate={(input: GenerateReportInput) => {
-          generateMutation.mutate(input, { onSuccess: () => setGenerateOpen(false) });
+          generateMutation.mutate(input, {
+            onSuccess: () => {
+              setGenerateOpen(false);
+              setPage(1);
+            },
+          });
         }}
         isPending={generateMutation.isPending}
       />
