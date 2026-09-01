@@ -29,10 +29,17 @@ export function ResourceSelect<T extends { id: string }>({
 }: ResourceSelectProps<T>) {
   const { data } = resource.useList();
   const items = (data ?? []).filter((item) => item.id !== excludeId);
+  const selected = items.find((item) => item.id === value);
+  const selectedLabel =
+    value === '' && allowNone
+      ? noneLabel
+      : selected
+        ? getLabel(selected)
+        : undefined;
 
   return (
     <Select value={value || NONE_VALUE} onValueChange={(v) => onValueChange(v === NONE_VALUE ? '' : v)}>
-      <SelectTrigger>
+      <SelectTrigger title={selectedLabel}>
         <SelectValue placeholder={placeholder ?? 'Select…'} />
       </SelectTrigger>
       <SelectContent>

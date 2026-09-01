@@ -61,6 +61,11 @@ export default function VerifyEmail() {
     }
   };
 
+  const handleBack = () => {
+    clerk.client?.resetSignUp();
+    navigate('/signup', { replace: true });
+  };
+
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
@@ -97,7 +102,7 @@ export default function VerifyEmail() {
               Resend code
             </button>
             {' · '}
-            <button type="button" className="text-primary underline underline-offset-2" onClick={() => navigate('/signup')}>
+            <button type="button" className="text-primary underline underline-offset-2" onClick={handleBack}>
               Back
             </button>
           </p>

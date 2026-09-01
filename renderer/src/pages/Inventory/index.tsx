@@ -339,6 +339,12 @@ export default function InventoryPage() {
             <DetailRow label="Reserved"    value={Number(viewItem.quantityReserved).toLocaleString()} />
             <DetailRow label="Available"   value={(Number(viewItem.quantityOnHand) - Number(viewItem.quantityReserved)).toLocaleString()} />
             <DetailRow label="Avg Cost"    value={viewItem.averageCost != null ? `$${Number(viewItem.averageCost).toFixed(2)}` : '—'} />
+            {viewItem.productPackSize != null && (
+              <>
+                <DetailRow label="Packs on Hand" value={`${viewItem.packsOnHand ?? 0} packs`} />
+                <DetailRow label="Loose Units"   value={`${viewItem.looseUnits ?? 0} units`} />
+              </>
+            )}
             <DetailRow label="Reorder Lvl" value={viewItem.reorderLevel != null ? String(viewItem.reorderLevel) : '—'} />
             <DetailRow label="Max Stock"   value={viewItem.maxStock != null ? String(viewItem.maxStock) : '—'} />
             <DetailRow label="Bin"         value={viewItem.binLocation ?? '—'} />

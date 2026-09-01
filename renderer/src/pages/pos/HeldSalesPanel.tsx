@@ -1,6 +1,7 @@
 import { Bills } from "../../api";
 import type { Bill } from "../../types";
 import { ListRestart, Loader2, X } from "lucide-react";
+import { fmt } from "./posHelpers";
 
 interface Props {
   onResume: (bill: Bill) => void;

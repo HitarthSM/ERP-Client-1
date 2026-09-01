@@ -11,6 +11,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from './ui/dropdown-menu';
+import { TruncatedLabel } from './TruncatedLabel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,9 +100,10 @@ function TriggerButton({
     >
       <SlidersHorizontal size={13} className="flex-shrink-0" />
 
-      <span className="font-medium">
-        {selectedLabel ?? label}
-      </span>
+      <TruncatedLabel
+        className="max-w-[160px] font-medium"
+        text={selectedLabel ?? label}
+      />
 
       {selectedCount != null && selectedCount > 1 && (
         <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
@@ -162,7 +164,7 @@ function OptionContent({ option, selected }: { option: FilterOption; selected: b
           {option.icon}
         </span>
       )}
-      <span className="flex-1 truncate">{option.label}</span>
+      <TruncatedLabel className="flex-1" text={option.label} />
       {option.description && (
         <span className="ml-auto flex-shrink-0 text-xs text-muted-foreground">{option.description}</span>
       )}

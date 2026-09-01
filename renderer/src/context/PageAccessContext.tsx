@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, ReactNode } from 'react';
+import { toast } from 'sonner';
 import { PageAccess } from '../api';
 import { useAuth } from './AuthContext';
 import { canAccessPage } from '../lib/page-access';
@@ -14,9 +15,15 @@ const PageAccessContext = createContext<PageAccessContextType | null>(null);
 export function PageAccessProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
 
-  const { data: configs = [], isLoading } = PageAccess.useList({
+  const { data: configs = [], isLoading, isError } = PageAccess.useList({
     enabled: !!user,
   });
+
+  // useQuery has no per-call onError in React Query v5 — surface it here instead,
+  // since a silent failure means every page looks inaccessible with no explanation.
+  useEffect(() => {
+    if (isError) toast.error('Failed to load page permissions — some pages may be hidden');
+  }, [isError]);
 
   const accessMap = useMemo(() => {
     const map = new Map<string, Set<string>>();

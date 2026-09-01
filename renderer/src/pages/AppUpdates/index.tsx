@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { FormSection } from '../../components/FormDrawer';
 import { Button } from '../../components/ui/button';
@@ -12,12 +13,13 @@ export default function AppUpdatesPage() {
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     const api = window.electronAPI;
     if (!api?.getAppVersion) {
       setLoading(false);
-      setCheckMsg('Electron bridge unavailable — restart the desktop app.');
+      setCheckMsg('Restart the desktop app and try again.');
       return;
     }
     void (async () => {
@@ -43,14 +45,14 @@ export default function AppUpdatesPage() {
         updateCheckIntervalMinutes: Math.max(1, intervalMinutes),
       });
       if (!res.success) {
-        toast.error(res.error ?? 'Failed to save');
+        toast.error(res.error ?? "Couldn't save settings");
         return;
       }
       if (res.settings) {
         setGithubToken(res.settings.githubToken);
         setIntervalMinutes(res.settings.updateCheckIntervalMinutes);
       }
-      toast.success('Update settings saved');
+      toast.success('Settings saved');
     } finally {
       setSaving(false);
     }
@@ -62,8 +64,8 @@ export default function AppUpdatesPage() {
     try {
       const res = await window.electronAPI.checkForUpdate();
       if (res.success) {
-        setCheckMsg('Check triggered — see the update banner if a new version is available.');
-        toast.success('Update check started');
+        setCheckMsg("If an update is available, you'll see a banner.");
+        toast.success('Looking for updates…');
       } else {
         setCheckMsg(res.error ?? 'Check failed');
         toast.error(res.error ?? 'Check failed');
@@ -80,39 +82,23 @@ export default function AppUpdatesPage() {
   return (
     <div className="space-y-4 max-w-xl">
       <div>
-        <h1 className="text-2xl font-semibold">App updates</h1>
+        <h1 className="text-2xl font-semibold">Software updates</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Local desktop settings for private GitHub releases. Not platform (Core API) configuration.
+          Check for new versions of this app and choose how often to look for them.
         </p>
       </div>
 
-      <FormSection title="Version">
+      <FormSection title="Current version">
         <p className="text-sm">
-          Installed: <span className="font-mono font-medium">{version}</span>
+          You're on version <span className="font-mono font-medium">{version}</span>
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          Scheduled checks run only in packaged installs. In development, Check for Updates returns
-          a packaged-only message.
+          Automatic checks run when the installed app is running.
         </p>
       </FormSection>
 
-      <FormSection title="GitHub access">
-        <label className="block text-sm mb-1">GitHub token (optional)</label>
-        <Input
-          type="password"
-          autoComplete="off"
-          value={githubToken}
-          onChange={(e) => setGithubToken(e.target.value)}
-          placeholder="ghp_… or github_pat_… (optional)"
-          className="font-mono text-sm"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Releases come from public repo{' '}
-          <span className="font-mono">HitarthSM/ERP-Client</span>. A token is optional (helps with
-          API rate limits). Save after changing.
-        </p>
-
-        <label className="block text-sm mb-1 mt-4">Auto-check interval (minutes)</label>
+      <FormSection title="Update settings">
+        <label className="block text-sm mb-1">Check for updates every (minutes)</label>
         <Input
           type="number"
           min={1}
@@ -121,12 +107,12 @@ export default function AppUpdatesPage() {
           className="w-40"
         />
         <p className="text-xs text-muted-foreground mt-1">
-          Default 1440 (24h). Takes effect on the next scheduled cycle after save.
+          Example: 1440 = once a day. Changes apply after you save.
         </p>
 
         <div className="flex flex-wrap gap-2 mt-4">
           <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-            {saving ? 'Saving…' : 'Save settings'}
+            {saving ? 'Saving…' : 'Save'}
           </Button>
           <Button
             type="button"
@@ -134,8 +120,39 @@ export default function AppUpdatesPage() {
             onClick={() => void handleCheck()}
             disabled={checking}
           >
-            {checking ? 'Checking…' : 'Check for Updates'}
+            {checking ? 'Checking…' : 'Check now'}
           </Button>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((o) => !o)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            aria-expanded={advancedOpen}
+          >
+            <ChevronDown
+              size={14}
+              className={`transition-transform ${advancedOpen ? 'rotate-0' : '-rotate-90'}`}
+            />
+            Advanced options
+          </button>
+          {advancedOpen && (
+            <div className="space-y-1 pl-1">
+              <label className="block text-sm mb-1">Access key (optional)</label>
+              <Input
+                type="password"
+                autoComplete="off"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="Leave blank unless your IT team provided a key"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Usually not needed. Only add a key if your IT team asked you to. Then save.
+              </p>
+            </div>
+          )}
         </div>
 
         {checkMsg && (

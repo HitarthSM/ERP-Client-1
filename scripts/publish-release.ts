@@ -2,15 +2,17 @@ import { readFileSync, existsSync, rmSync } from 'fs';
 import { execSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveAppName } from './app-name';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const envPath = resolve(root, '.env');
 const pkgPath = resolve(root, 'package.json');
 
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+const appName = resolveAppName();
 
 console.log(`\n======================================================`);
-console.log(`🚀 Preparing to publish Core ERP Client v${pkg.version}`);
+console.log(`🚀 Preparing to publish ${appName} v${pkg.version}`);
 console.log(`======================================================\n`);
 
 // 1. Manual dotenv parsing
@@ -51,19 +53,22 @@ process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= 'false'; // Skip code signing auto-d
 
 console.log('✅ Token loaded. Starting build and package process...\n');
 
-// 5. Execute build & publish
+// 5. Execute build & publish (productName from APP_NAME)
 try {
-  execSync('npm run build && electron-builder --win --x64 --publish always', {
-    stdio: 'inherit',
-    cwd: root,
-    env: process.env,
-  });
+  execSync(
+    `npm run build && npx tsx scripts/run-electron-builder.ts --win --x64 --publish always`,
+    {
+      stdio: 'inherit',
+      cwd: root,
+      env: process.env,
+    },
+  );
   console.log(`\n🎉 Successfully published v${pkg.version} to GitHub Releases!`);
   console.log(`   Don't forget to push your code and tags to the repository:`);
   console.log(`   git commit -am "chore: release v${pkg.version}"`);
   console.log(`   git tag v${pkg.version}`);
   console.log(`   git push && git push --tags\n`);
-} catch (error) {
+} catch {
   console.error('\n❌ Build or publish failed. Please check the logs above.');
   process.exit(1);
 }

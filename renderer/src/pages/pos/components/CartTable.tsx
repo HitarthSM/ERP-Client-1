@@ -151,14 +151,28 @@ export function CartTable({
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => onQtyChange(line.id, Math.max(1, line.qty - 1))}
+                        onClick={() => onQtyChange(line.id, Math.max(mode === 'sales' ? 0.001 : 1, line.qty - 1))}
                         className="p-1 rounded hover:bg-muted text-muted-foreground transition"
                       >
                         <Minus size={11} />
                       </button>
-                      <span className="w-6 text-center font-semibold text-foreground">
-                        {line.qty}
-                      </span>
+                      {mode === 'sales' ? (
+                        <input
+                          type="number"
+                          min="0.001"
+                          step="any"
+                          value={line.qty}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (!isNaN(v) && v > 0) onQtyChange(line.id, v);
+                          }}
+                          className="w-14 text-center text-sm font-semibold text-foreground border border-border rounded px-1 py-0.5 outline-none focus:border-primary tabular-nums"
+                        />
+                      ) : (
+                        <span className="w-6 text-center font-semibold text-foreground">
+                          {line.qty}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => onQtyChange(line.id, line.qty + 1)}

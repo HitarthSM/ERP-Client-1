@@ -9,9 +9,6 @@ import {
   DollarSign,
   Clock,
   ChevronRight,
-  BarChart3,
-  Layers,
-  Wallet,
   Building2,
   CheckCircle2,
   LayoutDashboard,
@@ -19,11 +16,7 @@ import {
   MapPin,
   Car,
   ArrowRightLeft,
-  TrendingUp,
-  TrendingDown,
-  Boxes,
   Truck,
-  Activity,
   Zap,
 } from 'lucide-react';
 import {
@@ -40,8 +33,6 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  RadialBarChart,
-  RadialBar,
 } from 'recharts';
 import { cn } from '../../lib/utils';
 import { useSession } from '../../context/SessionContext';
@@ -50,20 +41,17 @@ import {
   Suppliers,
   PurchaseOrders,
   Bills,
-  PaymentTransactions,
   Notifications,
   Customers,
   Locations,
   StockTransfers,
   useInventoryLowStock,
   useInventoryValuation,
-  Inventory,
-  Analytics,
   FleetVehicles,
   FleetTrips,
 } from '../../api';
 import { formatEntityLabel } from '../../lib/entityLabel';
-import type { PurchaseOrder, Notification as NotificationType, Location, Product } from '../../types';
+import type { PurchaseOrder, Notification as NotificationType, Location } from '../../types';
 
 // ── Chart colour palette ───────────────────────────────────────────────────────
 
@@ -81,12 +69,6 @@ const C = {
 };
 
 const PIE_COLORS = [C.blue, C.green, C.orange, C.rose, C.purple, C.teal];
-
-function fmtMonth(ym: string): string {
-  if (!ym.includes('-')) return ym;
-  const [year, month] = ym.split('-');
-  return new Date(Number(year), Number(month) - 1).toLocaleDateString('en', { month: 'short' });
-}
 
 // ── Hooks ──────────────────────────────────────────────────────────────────────
 
@@ -329,6 +311,20 @@ function OverviewTab() {
         <KpiCard label="Inventory Value" rawValue={Math.round(invValue)} format="currency" icon={DollarSign} iconBg="bg-amber-500/10" iconColor="text-amber-500" delay={400} />
       </div>
 
+      <AnimFade delay={120}>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/dashboard/sales" className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border bg-card hover:border-primary/40 transition-colors">
+            Sales analytics →
+          </Link>
+          <Link to="/dashboard/purchase" className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border bg-card hover:border-primary/40 transition-colors">
+            Purchase analytics →
+          </Link>
+          <Link to="/dashboard/inventory" className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border bg-card hover:border-primary/40 transition-colors">
+            Inventory analytics →
+          </Link>
+        </div>
+      </AnimFade>
+
       {/* Low-stock alert */}
       {!lowLoading && lowStock && lowStock.length > 0 && (
         <AnimFade delay={200}>
@@ -478,388 +474,6 @@ function OverviewTab() {
   );
 }
 
-// ── Tab 2: Analytics ───────────────────────────────────────────────────────────
-
-function AnalyticsTab() {
-  // Sales: bill counts by status (real)
-  const { data: billCompleted } = Bills.useSearch({ filters: { status: 'COMPLETED' } });
-  const { data: billDraft } = Bills.useSearch({ filters: { status: 'DRAFT' } });
-  const { data: billInitiated } = Bills.useSearch({ filters: { status: 'INITIATED' } });
-  const { data: billCancelled } = Bills.useSearch({ filters: { status: 'CANCELLED' } });
-
-  // PO by status (real)
-  const { data: poDraft } = PurchaseOrders.useSearch({ limit: 1, filters: { status: 'draft' } });
-  const { data: poOrdered } = PurchaseOrders.useSearch({ limit: 1, filters: { status: 'ordered' } });
-  const { data: poPartial } = PurchaseOrders.useSearch({ limit: 1, filters: { status: 'partially_received' } });
-  const { data: poReceived } = PurchaseOrders.useSearch({ limit: 1, filters: { status: 'received' } });
-  const { data: poCancelled } = PurchaseOrders.useSearch({ limit: 1, filters: { status: 'cancelled' } });
-
-  // Inventory
-  const { data: invSearch } = Inventory.useSearch({ limit: 1 });
-  const { data: lowStock } = useInventoryLowStock();
-  const { data: valuation } = useInventoryValuation();
-
-  // Entities
-  const { data: productsList } = Products.useList();
-  const { data: locationsList } = Locations.useList();
-  const { data: paymentsData } = PaymentTransactions.useSearch({ limit: 1 });
-  const { data: revenueTrend, isLoading: revenueLoading } = Analytics.useRevenueTrend(6);
-
-  const totalInventory = invSearch?.total ?? 0;
-  const lowCount = lowStock?.length ?? 0;
-  const healthyCount = Math.max(0, totalInventory - lowCount);
-
-  // Inventory value by location (computed)
-  const inventoryByLocation = useMemo(() => {
-    if (!valuation || !locationsList) return [];
-    const locMap = new Map<string, string>(locationsList.map((l) => [l.id, l.name]));
-    const grouped = new Map<string, number>();
-    for (const item of valuation) {
-      const v = item.quantityOnHand * (item.averageCost ?? 0);
-      grouped.set(item.locationId, (grouped.get(item.locationId) ?? 0) + v);
-    }
-    return Array.from(grouped.entries())
-      .map(([id, value]) => ({ name: locMap.get(id) ?? id.slice(0, 8), value: Math.round(value) }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-  }, [valuation, locationsList]);
-
-  // Top products by stock value (computed)
-  const topByValue = useMemo(() => {
-    if (!valuation || !productsList) return [];
-    const pMap = new Map<string, string>(
-      productsList.map((p: Product) => [p.id, p.name?.slice(0, 20) ?? p.sku ?? p.id.slice(0, 8)])
-    );
-    const grouped = new Map<string, number>();
-    const qtyMap = new Map<string, number>();
-    for (const item of valuation) {
-      const v = item.quantityOnHand * (item.averageCost ?? 0);
-      grouped.set(item.productId, (grouped.get(item.productId) ?? 0) + v);
-      qtyMap.set(item.productId, (qtyMap.get(item.productId) ?? 0) + item.quantityOnHand);
-    }
-    return Array.from(grouped.entries())
-      .map(([id, value]) => ({
-        name: pMap.get(id) ?? id.slice(0, 8),
-        value: Math.round(value),
-        qty: qtyMap.get(id) ?? 0,
-      }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-  }, [valuation, productsList]);
-
-  // Top products by quantity (computed)
-  const topByQty = useMemo(() => {
-    if (!valuation || !productsList) return [];
-    const pMap = new Map<string, string>(
-      productsList.map((p: Product) => [p.id, p.name?.slice(0, 20) ?? p.sku ?? p.id.slice(0, 8)])
-    );
-    const grouped = new Map<string, number>();
-    for (const item of valuation) {
-      grouped.set(item.productId, (grouped.get(item.productId) ?? 0) + item.quantityOnHand);
-    }
-    return Array.from(grouped.entries())
-      .map(([id, qty]) => ({ name: pMap.get(id) ?? id.slice(0, 8), qty }))
-      .sort((a, b) => b.qty - a.qty)
-      .slice(0, 8);
-  }, [valuation, productsList]);
-
-  // Bill status pie data
-  const billStatusData = [
-    { name: 'Completed', value: billCompleted?.total ?? 0, color: C.green },
-    { name: 'Initiated', value: billInitiated?.total ?? 0, color: C.blue },
-    { name: 'Draft', value: billDraft?.total ?? 0, color: C.amber },
-    { name: 'Cancelled', value: billCancelled?.total ?? 0, color: C.rose },
-  ].filter((d) => d.value > 0);
-
-  // PO status pie data
-  const poStatusData = [
-    { name: 'Received', value: poReceived?.total ?? 0, color: C.green },
-    { name: 'Ordered', value: poOrdered?.total ?? 0, color: C.blue },
-    { name: 'Partial', value: poPartial?.total ?? 0, color: C.amber },
-    { name: 'Draft', value: poDraft?.total ?? 0, color: C.purple },
-    { name: 'Cancelled', value: poCancelled?.total ?? 0, color: C.rose },
-  ].filter((d) => d.value > 0);
-
-  // Stock health radial
-  const stockHealthData = [
-    { name: 'Healthy', value: healthyCount, fill: C.green },
-    { name: 'Low Stock', value: lowCount, fill: C.rose },
-  ];
-
-  const totalInvValue = useMemo(() => {
-    if (!valuation) return 0;
-    return valuation.reduce((s, r) => s + (r.averageCost ?? 0) * r.quantityOnHand, 0);
-  }, [valuation]);
-
-  return (
-    <div className="space-y-10">
-      {/* ── Sales & Revenue ── */}
-      <section>
-        <SectionHeader icon={TrendingUp} title="Sales & Revenue" iconColor="text-green-500" />
-        <div className="grid gap-4 lg:grid-cols-3">
-          {/* Bills by status pie */}
-          <AnimFade delay={0}>
-            <ChartCard title="Bills by Status" subtitle="Real data · all-time breakdown">
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={billStatusData.length ? billStatusData : [{ name: 'No data', value: 1, color: '#e2e8f0' }]}
-                    cx="50%" cy="50%"
-                    innerRadius={55} outerRadius={85}
-                    dataKey="value"
-                    animationBegin={0} animationDuration={1200} animationEasing="ease-out"
-                    labelLine={false}
-                    label={(props) => <PieLabel {...props} />}
-                  >
-                    {(billStatusData.length ? billStatusData : [{ color: '#e2e8f0' }]).map((entry, i) => (
-                      <Cell key={i} fill={entry.color} stroke="transparent" />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<ChartTooltipBox />} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </AnimFade>
-
-          {/* Revenue trend area chart */}
-          <AnimFade delay={80} className="lg:col-span-2">
-            <ChartCard title="Revenue Trend" subtitle="Live · last 6 months">
-              {revenueLoading ? (
-                <div className="h-[220px] flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-              ) : !(revenueTrend?.length) ? (
-                <div className="h-[220px] flex items-center justify-center text-sm text-muted-foreground">No sales yet</div>
-              ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={revenueTrend}>
-                  <defs>
-                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={C.green} stopOpacity={0.25} />
-                      <stop offset="95%" stopColor={C.green} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tickFormatter={fmtMonth} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip content={<ChartTooltipBox currency />} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="revenue" name="Revenue" stroke={C.green} strokeWidth={2} fill="url(#revGrad)" dot={{ r: 3, fill: C.green }} animationDuration={1400} />
-                </AreaChart>
-              </ResponsiveContainer>
-              )}
-            </ChartCard>
-          </AnimFade>
-        </div>
-
-        {/* Sales KPIs */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-4">
-          <AnimFade delay={0}>
-            <div className="p-4 bg-card border border-border rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-green-500/10"><TrendingUp size={18} className="text-green-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Completed Sales</p>
-                <p className="text-xl font-bold">{billCompleted?.total ?? '…'}</p>
-              </div>
-            </div>
-          </AnimFade>
-          <AnimFade delay={80}>
-            <div className="p-4 bg-card border border-border rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-blue-500/10"><Activity size={18} className="text-blue-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">In-Progress Bills</p>
-                <p className="text-xl font-bold">{(billInitiated?.total ?? 0) + (billDraft?.total ?? 0) || '…'}</p>
-              </div>
-            </div>
-          </AnimFade>
-          <AnimFade delay={160}>
-            <div className="p-4 bg-card border border-border rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-rose-500/10"><TrendingDown size={18} className="text-rose-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Cancelled Bills</p>
-                <p className="text-xl font-bold">{billCancelled?.total ?? '…'}</p>
-              </div>
-            </div>
-          </AnimFade>
-          <AnimFade delay={240}>
-            <div className="p-4 bg-card border border-border rounded-xl shadow-sm flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-teal-500/10"><Wallet size={18} className="text-teal-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Payments Recorded</p>
-                <p className="text-xl font-bold">{paymentsData?.total ?? '…'}</p>
-              </div>
-            </div>
-          </AnimFade>
-        </div>
-      </section>
-
-      {/* ── Inventory Intelligence ── */}
-      <section>
-        <SectionHeader icon={Boxes} title="Inventory Intelligence" iconColor="text-blue-500" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
-          <AnimFade delay={0}>
-            <KpiCard label="Inventory Records" rawValue={totalInventory} icon={Layers} iconBg="bg-blue-500/10" iconColor="text-blue-500" to="/inventory" />
-          </AnimFade>
-          <AnimFade delay={80}>
-            <KpiCard label="Healthy SKUs" rawValue={healthyCount} icon={CheckCircle2} iconBg="bg-green-500/10" iconColor="text-green-500" />
-          </AnimFade>
-          <AnimFade delay={160}>
-            <KpiCard label="Low-stock SKUs" rawValue={lowCount} icon={AlertTriangle} iconBg="bg-amber-500/10" iconColor="text-amber-500" />
-          </AnimFade>
-          <AnimFade delay={240}>
-            <KpiCard label="Total Stock Value" rawValue={Math.round(totalInvValue)} format="currency" icon={DollarSign} iconBg="bg-green-500/10" iconColor="text-green-500" />
-          </AnimFade>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-3">
-          {/* Inventory value by location */}
-          <AnimFade delay={0} className="lg:col-span-2">
-            <ChartCard title="Inventory Value by Location" subtitle="Real · on-hand qty × average cost per location">
-              {inventoryByLocation.length > 0 ? (
-                <ResponsiveContainer width="100%" height={230}>
-                  <BarChart data={inventoryByLocation} barCategoryGap="35%">
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip content={<ChartTooltipBox currency />} />
-                    <Bar dataKey="value" name="Value" fill={C.blue} radius={[6, 6, 0, 0]} animationDuration={1200} animationEasing="ease-out">
-                      {inventoryByLocation.map((_, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[230px] flex items-center justify-center text-sm text-muted-foreground">No inventory data available</div>
-              )}
-            </ChartCard>
-          </AnimFade>
-
-          {/* Stock health radial */}
-          <AnimFade delay={120}>
-            <ChartCard title="Stock Health" subtitle="Healthy vs low-stock">
-              <ResponsiveContainer width="100%" height={230}>
-                <RadialBarChart cx="50%" cy="50%" innerRadius={40} outerRadius={90} data={stockHealthData} startAngle={90} endAngle={-270}>
-                  <RadialBar dataKey="value" cornerRadius={6} animationDuration={1200} label={false} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                  <Tooltip content={<ChartTooltipBox />} />
-                </RadialBarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </AnimFade>
-        </div>
-      </section>
-
-      {/* ── Product Performance ── */}
-      <section>
-        <SectionHeader icon={Package} title="Product Performance" iconColor="text-purple-500" />
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* Top products by stock value */}
-          <AnimFade delay={0}>
-            <ChartCard title="Top Products by Stock Value" subtitle="Real · on-hand qty × average cost per product">
-              {topByValue.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart layout="vertical" data={topByValue} margin={{ left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={80} />
-                    <Tooltip content={<ChartTooltipBox currency />} />
-                    <Bar dataKey="value" name="Stock Value" fill={C.purple} radius={[0, 6, 6, 0]} animationDuration={1300} animationEasing="ease-out">
-                      {topByValue.map((_, i) => (
-                        <Cell key={i} fill={`hsl(${270 - i * 12}, 70%, ${55 + i * 3}%)`} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">No product data available</div>
-              )}
-            </ChartCard>
-          </AnimFade>
-
-          {/* Top products by quantity */}
-          <AnimFade delay={100}>
-            <ChartCard title="Top Products by Stock Quantity" subtitle="Real · total units on hand across all locations">
-              {topByQty.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart layout="vertical" data={topByQty} margin={{ left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={80} />
-                    <Tooltip content={<ChartTooltipBox />} />
-                    <Bar dataKey="qty" name="Units" fill={C.teal} radius={[0, 6, 6, 0]} animationDuration={1300} animationEasing="ease-out">
-                      {topByQty.map((_, i) => (
-                        <Cell key={i} fill={`hsl(${175 + i * 8}, 70%, ${45 + i * 3}%)`} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">No product data available</div>
-              )}
-            </ChartCard>
-          </AnimFade>
-        </div>
-      </section>
-
-      {/* ── Procurement ── */}
-      <section>
-        <SectionHeader icon={ShoppingCart} title="Procurement" iconColor="text-orange-500" />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <AnimFade delay={0}>
-            <ChartCard title="Purchase Orders by Status" subtitle="Real · all-time breakdown">
-              <ResponsiveContainer width="100%" height={230}>
-                <PieChart>
-                  <Pie
-                    data={poStatusData.length ? poStatusData : [{ name: 'No data', value: 1, color: '#e2e8f0' }]}
-                    cx="50%" cy="50%"
-                    innerRadius={55} outerRadius={85}
-                    dataKey="value"
-                    animationBegin={0} animationDuration={1200} animationEasing="ease-out"
-                    labelLine={false}
-                    label={(props) => <PieLabel {...props} />}
-                  >
-                    {(poStatusData.length ? poStatusData : [{ color: '#e2e8f0' }]).map((entry, i) => (
-                      <Cell key={i} fill={entry.color} stroke="transparent" />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<ChartTooltipBox />} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </AnimFade>
-
-          <AnimFade delay={100}>
-            <ChartCard title="Procurement KPIs" subtitle="Real counts — all-time">
-              <div className="space-y-4 mt-2">
-                {[
-                  { label: 'Draft', value: poDraft?.total ?? 0, color: C.purple, max: (poDraft?.total ?? 0) + (poOrdered?.total ?? 0) + (poReceived?.total ?? 0) + 1 },
-                  { label: 'Ordered', value: poOrdered?.total ?? 0, color: C.blue, max: (poDraft?.total ?? 0) + (poOrdered?.total ?? 0) + (poReceived?.total ?? 0) + 1 },
-                  { label: 'Partial', value: poPartial?.total ?? 0, color: C.amber, max: (poDraft?.total ?? 0) + (poOrdered?.total ?? 0) + (poReceived?.total ?? 0) + 1 },
-                  { label: 'Received', value: poReceived?.total ?? 0, color: C.green, max: (poDraft?.total ?? 0) + (poOrdered?.total ?? 0) + (poReceived?.total ?? 0) + 1 },
-                  { label: 'Cancelled', value: poCancelled?.total ?? 0, color: C.rose, max: (poDraft?.total ?? 0) + (poOrdered?.total ?? 0) + (poReceived?.total ?? 0) + 1 },
-                ].map((row) => (
-                  <div key={row.label}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="font-medium">{row.label}</span>
-                      <span className="text-muted-foreground">{row.value}</span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-1000"
-                        style={{ width: `${Math.min(100, (row.value / row.max) * 100)}%`, background: row.color }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ChartCard>
-          </AnimFade>
-        </div>
-      </section>
-    </div>
-  );
-}
 
 // ── Tab 3: Operations ──────────────────────────────────────────────────────────
 
@@ -1113,7 +727,7 @@ function OperationsTab() {
 
 // ── Root Dashboard ─────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'analytics' | 'operations';
+type Tab = 'overview' | 'operations';
 
 export default function Dashboard() {
   const { user, organization } = useSession();
@@ -1128,7 +742,6 @@ export default function Dashboard() {
 
   const tabs: { id: Tab; icon: React.ComponentType<{ size?: number }>; label: string }[] = [
     { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
-    { id: 'analytics', icon: BarChart3, label: 'Analytics' },
     { id: 'operations', icon: Truck, label: 'Operations' },
   ];
 
@@ -1171,7 +784,6 @@ export default function Dashboard() {
       {/* Tab content */}
       <div key={activeTab} className="animate-in fade-in duration-300">
         {activeTab === 'overview' && <OverviewTab />}
-        {activeTab === 'analytics' && <AnalyticsTab />}
         {activeTab === 'operations' && <OperationsTab />}
       </div>
     </div>

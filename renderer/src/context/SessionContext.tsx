@@ -76,7 +76,7 @@ function deriveOrg(raw: MeResponse): SessionOrg | null {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const { user: raw, loading, logout, refresh } = useAuth();
+  const { user: raw, loading, syncing, logout, refresh } = useAuth();
 
   const value = useMemo<SessionContextValue>(() => {
     const user = raw ? deriveUser(raw) : null;
@@ -93,7 +93,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       user,
       organization,
       raw,
-      isLoading: loading,
+      isLoading: loading || syncing,
       isSuperAdmin,
       isOrgAdmin,
       isStoreManager,
@@ -102,7 +102,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
     };
-  }, [raw, loading, logout, refresh]);
+  }, [raw, loading, syncing, logout, refresh]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

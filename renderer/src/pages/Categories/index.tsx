@@ -8,6 +8,7 @@ import { FormDrawer, Field } from '../../components/FormDrawer';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Categories, Organizations, useCategoryParents } from '../../api';
+import { useSession } from '../../context/SessionContext';
 import { usePagination } from '../../hooks/usePagination';
 import { formatEntityLabel } from '../../lib/entityLabel';
 import type { Category } from '../../types';
@@ -54,12 +55,16 @@ export default function CategoriesPage() {
     }
     return m;
   }, [allCategories]);
-  const { data: orgs } = Organizations.useList();
+  const { organization, isSuperAdmin } = useSession();
+  const { data: orgs } = Organizations.useList(isSuperAdmin);
   const orgName = useMemo(() => {
     const m = new Map<string, string>();
+    if (organization) {
+      m.set(organization.id, formatEntityLabel({ name: organization.name, id: organization.id }));
+    }
     for (const o of orgs ?? []) m.set(o.id, formatEntityLabel({ name: o.name, id: o.id }));
     return m;
-  }, [orgs]);
+  }, [orgs, organization]);
 
   const openCreate = () => {
     setEditing(null);

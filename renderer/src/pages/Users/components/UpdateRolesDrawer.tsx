@@ -5,13 +5,14 @@ import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { ClerkUsers } from '../../../api';
 import type { ClerkUser } from '../../../types';
+import { ROLE_NAMES } from '../../../types';
 
 interface Props {
   user: ClerkUser | null;
   onClose: () => void;
 }
 
-export const PRESET_ROLES = ['admin', 'manager', 'viewer', 'accountant', 'warehouse'];
+export const PRESET_ROLES: readonly string[] = ROLE_NAMES;
 
 export function UpdateRolesDrawer({ user, onClose }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
@@ -51,8 +52,8 @@ export function UpdateRolesDrawer({ user, onClose }: Props) {
     <FormDrawer
       open={!!user}
       onClose={onClose}
-      title="Edit Roles"
-      subtitle={displayName}
+      title="Clerk labels"
+      subtitle={`${displayName} — these tags live on the Clerk user and do not grant ERP page or API access. Use User Roles for that.`}
       footer={
         <>
           <Button onClick={handleSave} disabled={updateMutation.isPending}>

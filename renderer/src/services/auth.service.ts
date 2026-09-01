@@ -11,6 +11,9 @@ export interface MeResponse {
   isOnboarded: boolean;
   organization?: { id: string; name: string; slug: string; logoUrl?: string };
   membership?: { id: string; roleId: string; status: string; joinedAt?: string };
+  locationIds?: string[];
+  hasOrgWideAccess?: boolean;
+  currencyCode?: string;
 }
 
 export const AuthService = {
@@ -23,7 +26,4 @@ export const AuthService = {
       '/api/v1/auth/organizations',
       payload,
     ),
-
-  inviteMember: (payload: { email: string; roleId: string }) =>
-    post<{ membershipId: string; status: string }>('/api/v1/auth/invite', payload),
 };

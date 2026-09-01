@@ -55,6 +55,11 @@ export async function resolveSignInStatus(
   }
   if (signIn.status === 'needs_second_factor' || signIn.status === 'needs_client_trust') {
     await prepareEmailSecondFactor(signIn);
+    // Avoid re-preparing the email second factor when the verify page mounts
+    // immediately after this navigation (which would spam users with a new code).
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem('erp.verify-second-factor.prepared', '1');
+    }
     navigate('/verify-second-factor', { replace: true });
     return;
   }

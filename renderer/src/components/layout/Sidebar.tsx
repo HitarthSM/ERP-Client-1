@@ -2,6 +2,7 @@ import { useState, Fragment } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MODULES } from '../../config/modules';
+import { getAppInitial, getAppName } from '../../lib/branding';
 import { cn } from '../../lib/utils';
 import { Tooltip } from '../ui/tooltip';
 import { usePageAccess } from '../../context/PageAccessContext';
@@ -32,17 +33,17 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
     <aside className={cn("bg-card border-r border-border transition-all duration-300 flex flex-col h-full", collapsed ? 'w-16' : 'w-64')}>
       <div className="h-14 flex items-center justify-between px-4 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold flex-shrink-0">E</div>
-          {!collapsed && <span className="font-bold text-lg text-primary whitespace-nowrap overflow-hidden truncate">ERP System</span>}
+          <div className="w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold flex-shrink-0">{getAppInitial()}</div>
+          {!collapsed && <span className="font-bold text-lg text-primary whitespace-nowrap overflow-hidden truncate">{getAppName()}</span>}
         </div>
         {!collapsed && (
-          <button onClick={onToggle} className="p-1 rounded-md hover:bg-accent hover:text-accent-foreground flex-shrink-0">
+          <button onClick={onToggle} aria-label="Collapse sidebar" className="p-1 rounded-md hover:bg-accent hover:text-accent-foreground flex-shrink-0">
             <ChevronLeft size={20} />
           </button>
         )}
       </div>
       {collapsed && (
-        <button onClick={onToggle} className="mx-auto mt-2 p-1 rounded-md hover:bg-accent hover:text-accent-foreground">
+        <button onClick={onToggle} aria-label="Expand sidebar" className="mx-auto mt-2 p-1 rounded-md hover:bg-accent hover:text-accent-foreground">
           <ChevronRight size={20} />
         </button>
       )}

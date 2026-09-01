@@ -17,20 +17,26 @@ interface FormState {
   email: string;
   phone: string;
   gstin: string;
+  shopName: string;
+  address: string;
+  pinCode: string;
   creditLimit: string;
   customerType: CustomerType;
   discountPercent: string;
   skipOverLimitApproval: '' | 'true' | 'false';
 }
 
-function emptyForm(initialName?: string): FormState {
+function emptyForm(initialName?: string, defaultCustomerType: CustomerType = 'new'): FormState {
   return {
     name: initialName ?? '',
     email: '',
     phone: '',
     gstin: '',
+    shopName: '',
+    address: '',
+    pinCode: '',
     creditLimit: '',
-    customerType: 'new',
+    customerType: defaultCustomerType,
     discountPercent: '',
     skipOverLimitApproval: '',
   };
@@ -42,6 +48,9 @@ function formFromCustomer(customer: Customer): FormState {
     email: customer.email ?? '',
     phone: customer.phone ?? '',
     gstin: customer.gstin ?? '',
+    shopName: customer.shopName ?? '',
+    address: customer.address ?? '',
+    pinCode: customer.pinCode ?? '',
     creditLimit: customer.creditLimit != null ? String(customer.creditLimit) : '',
     customerType: (customer.customerType as CustomerType) || 'regular',
     discountPercent: customer.discountPercent != null ? String(customer.discountPercent) : '',
@@ -55,11 +64,22 @@ export interface CustomerFormDrawerProps {
   onClose: () => void;
   editing?: Customer | null;
   initialName?: string;
+  requireCreditLimit?: boolean;
   onSaved: (customer: Customer) => void;
 }
 
-export function CustomerFormDrawer({ open, onClose, editing, initialName, onSaved }: CustomerFormDrawerProps) {
-  const [form, setForm] = useState<FormState>(() => (editing ? formFromCustomer(editing) : emptyForm(initialName)));
+export function CustomerFormDrawer({
+  open,
+  onClose,
+  editing,
+  initialName,
+  requireCreditLimit,
+  onSaved,
+}: CustomerFormDrawerProps) {
+  const createDefaultType: CustomerType = requireCreditLimit ? 'regular' : 'new';
+  const [form, setForm] = useState<FormState>(() =>
+    editing ? formFromCustomer(editing) : emptyForm(initialName, createDefaultType),
+  );
   const createMutation = Customers.useCreate();
   const updateMutation = Customers.useUpdate();
   const { data: typeRules = [] } = BillingSettings.useCustomerTypeRules();
@@ -67,12 +87,16 @@ export function CustomerFormDrawer({ open, onClose, editing, initialName, onSave
 
   useEffect(() => {
     if (!open) return;
-    setForm(editing ? formFromCustomer(editing) : emptyForm(initialName));
-  }, [open, editing, initialName]);
+    setForm(editing ? formFromCustomer(editing) : emptyForm(initialName, createDefaultType));
+  }, [open, editing, initialName, createDefaultType]);
+
+  const creditLimitValue = Number(form.creditLimit.trim());
+  const creditLimitOk = !requireCreditLimit || (form.creditLimit.trim() !== '' && creditLimitValue > 0);
+  const canSubmit = form.name.trim() && creditLimitOk;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim()) return;
+    if (!canSubmit) return;
 
     const trimmedCreditLimit = form.creditLimit.trim();
     const trimmedDiscount = form.discountPercent.trim();
@@ -81,6 +105,9 @@ export function CustomerFormDrawer({ open, onClose, editing, initialName, onSave
       email: form.email.trim() || undefined,
       phone: form.phone.trim() || undefined,
       gstin: form.gstin.trim() || undefined,
+      shopName: form.shopName.trim() || undefined,
+      address: form.address.trim() || undefined,
+      pinCode: form.pinCode.trim() || undefined,
       creditLimit: trimmedCreditLimit ? Number(trimmedCreditLimit) : undefined,
       customerType: form.customerType,
       discountPercent: trimmedDiscount === '' ? null : Number(trimmedDiscount),
@@ -98,10 +125,10 @@ export function CustomerFormDrawer({ open, onClose, editing, initialName, onSave
     <FormDrawer
       open={open}
       onClose={onClose}
-      title={editing ? 'Edit Customer' : 'Add Customer'}
+      title={editing ? 'Edit Customer' : requireCreditLimit ? 'Add Creditor' : 'Add Customer'}
       footer={
         <>
-          <Button type="submit" form="customer-form-drawer" disabled={isSaving || !form.name.trim()}>
+          <Button type="submit" form="customer-form-drawer" disabled={isSaving || !canSubmit}>
             {isSaving ? 'Saving…' : editing ? 'Save' : 'Create'}
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>
@@ -123,11 +150,21 @@ export function CustomerFormDrawer({ open, onClose, editing, initialName, onSave
         <Field label="GSTIN">
           <Input value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value })} />
         </Field>
-        <Field label="Credit Limit">
+        <Field label="Shop / store name">
+          <Input value={form.shopName} onChange={(e) => setForm({ ...form, shopName: e.target.value })} />
+        </Field>
+        <Field label="Address">
+          <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        </Field>
+        <Field label="Postal PIN">
+          <Input value={form.pinCode} onChange={(e) => setForm({ ...form, pinCode: e.target.value })} />
+        </Field>
+        <Field label={requireCreditLimit ? 'Credit Limit (required)' : 'Credit Limit'}>
           <Input
             type="number"
             min="0"
             step="0.01"
+            required={requireCreditLimit}
             value={form.creditLimit}
             onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
             placeholder={

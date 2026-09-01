@@ -2,11 +2,13 @@ import { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import ProtectedRoute from './components/ProtectedRoute';
-import AppLayout from './components/layout/AppLayout';
+import AuthBootScreen from './components/auth/AuthBootScreen';
 import { useAuth } from './context/AuthContext';
 import { PageAccessProvider } from './context/PageAccessContext';
 import PageAccessRoute from './components/PageAccessRoute';
+import { clerk } from './lib/clerk';
 
+const AppLayout = lazy(() => import('./components/layout/AppLayout'));
 const SignIn = lazy(() => import('./pages/SignIn'));
 const SignUp = lazy(() => import('./pages/SignUp'));
 const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
@@ -36,9 +38,12 @@ const Notifications = lazy(() => import('./pages/Notifications'));
 const ReportGenerationLogs = lazy(() => import('./pages/ReportGenerationLogs'));
 const StockMovementsPage = lazy(() => import('./pages/StockMovements'));
 const StockTransfersPage = lazy(() => import('./pages/StockTransfers'));
+const StockRequestsPage = lazy(() => import('./pages/StockRequests'));
 const UnpublishedStockPage = lazy(() => import('./pages/UnpublishedStock'));
 const ProductLogsPage = lazy(() => import('./pages/ProductLogs'));
 const Customers = lazy(() => import('./pages/Customers'));
+const CustomerDetail = lazy(() => import('./pages/CustomerDetail'));
+const Creditors = lazy(() => import('./pages/Creditors'));
 const Orders = lazy(() => import('./pages/Orders'));
 const Invoices = lazy(() => import('./pages/Invoices'));
 const ActivityLogs = lazy(() => import('./pages/ActivityLogs'));
@@ -47,6 +52,7 @@ const Expenses = lazy(() => import('./pages/Expenses'));
 const PlatformConfigurations = lazy(() => import('./pages/PlatformConfigurations'));
 const AppUpdates = lazy(() => import('./pages/AppUpdates'));
 const BillingSettings = lazy(() => import('./pages/BillingSettings'));
+const NotificationSettings = lazy(() => import('./pages/NotificationSettings'));
 const PurchaseItems = lazy(() => import('./pages/PurchaseItems'));
 const Roles = lazy(() => import('./pages/Roles'));
 const UserRoles = lazy(() => import('./pages/UserRoles'));
@@ -63,6 +69,7 @@ const FleetDriversPage = lazy(() => import('./pages/Fleet/Drivers'));
 const FleetTripsPage = lazy(() => import('./pages/Fleet/Trips'));
 const FleetMaintenancePage = lazy(() => import('./pages/Fleet/Maintenance'));
 const FleetExpensesPage = lazy(() => import('./pages/Fleet/Expenses'));
+const SalesList = lazy(() => import('./pages/SalesList'));
 const SalesBilling = lazy(() => import('./pages/pos/SalesBilling'));
 const PurchaseBilling = lazy(() => import('./pages/pos/PurchaseBilling'));
 
@@ -74,10 +81,17 @@ function RouteFallback() {
   );
 }
 
+function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
+  const { user, syncing, bootPhase } = useAuth();
+  if (syncing && clerk.session) return <AuthBootScreen phase={bootPhase ?? 'session'} />;
+  if (user) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 // Requires a valid Clerk session but not an org — used for the onboarding flow.
 function SessionRoute({ children }: { children: React.ReactNode }) {
-  const { user, syncing } = useAuth();
-  if (syncing && !user) return <RouteFallback />;
+  const { user, syncing, bootPhase } = useAuth();
+  if (syncing) return <AuthBootScreen phase={bootPhase ?? 'session'} />;
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -93,8 +107,8 @@ function App() {
     <HashRouter>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/login" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
+          <Route path="/login" element={<PublicOnlyRoute><SignIn /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><SignUp /></PublicOnlyRoute>} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/verify-second-factor" element={<VerifySecondFactor />} />
           <Route path="/sso-callback" element={<SSOCallback />} />
@@ -119,6 +133,7 @@ function App() {
             <Route path="dashboard/inventory" element={<InventoryDashboard />} />
             <Route path="dashboard/sales" element={<SalesDashboard />} />
             <Route path="pos" element={<PosRedirect />} />
+            <Route path="sales/list" element={<SalesList />} />
             <Route path="pos/sales" element={<SalesBilling />} />
             <Route path="pos/purchase" element={<PurchaseBilling />} />
             <Route path="bills" element={<Bills />} />
@@ -129,9 +144,12 @@ function App() {
             <Route path="report-generation-logs" element={<ReportGenerationLogs />} />
             <Route path="stock-movements" element={<StockMovementsPage />} />
             <Route path="stock-transfers" element={<StockTransfersPage />} />
+            <Route path="stock-requests" element={<StockRequestsPage />} />
             <Route path="unpublished-stock" element={<UnpublishedStockPage />} />
             <Route path="product-logs" element={<ProductLogsPage />} />
             <Route path="customers" element={<Customers />} />
+            <Route path="customers/:id" element={<CustomerDetail />} />
+            <Route path="sales/creditors" element={<Creditors />} />
             <Route path="pending-approvals" element={<PendingApprovals />} />
             <Route path="black-ledger" element={<BlackLedger />} />
             <Route path="orders" element={<Orders />} />
@@ -152,6 +170,7 @@ function App() {
             <Route path="platform-configurations" element={<PlatformConfigurations />} />
             <Route path="settings/app" element={<AppUpdates />} />
             <Route path="settings/billing" element={<BillingSettings />} />
+            <Route path="settings/notifications" element={<NotificationSettings />} />
             <Route path="purchase-items" element={<PurchaseItems />} />
             <Route path="roles" element={<Roles />} />
             <Route path="user-roles" element={<UserRoles />} />

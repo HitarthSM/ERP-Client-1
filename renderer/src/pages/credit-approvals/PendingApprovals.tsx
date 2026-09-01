@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { CreditApprovals, Customers, Locations, Products } from "../../api";
+import { useAuth } from "../../context/AuthContext";
 import { get } from "../../lib/http";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { formatEntityLabel, truncateId } from "../../lib/entityLabel";
@@ -95,6 +96,7 @@ function ApprovalCard({
 
 export default function PendingApprovals() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: approvals = [], isLoading } = CreditApprovals.useListPending();
   const approve = CreditApprovals.useApprove();
   const reject = CreditApprovals.useReject();
@@ -137,6 +139,9 @@ export default function PendingApprovals() {
           const loc = locations.find((l) => l.id === bill.locationId);
           const customer = customerMap.get(req.customerId);
           const receipt = billToPosReceipt(bill, {
+            orgName: user?.organization?.name,
+            logoUrl: user?.organization?.logoUrl,
+            orgMeta: user?.organization?.slug,
             locationName: loc
               ? formatEntityLabel({ name: loc.name, id: loc.id })
               : bill.locationId,

@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Download } from 'lucide-react';
 import { DataTable, Column } from '../../components/DataTable';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { FormDrawer, Field } from '../../components/FormDrawer';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { FormSelect } from '../../components/FormSelect';
 import { Bills, Customers, Locations } from '../../api';
+import { CustomerPicker } from '../../components/CustomerPicker';
 import { BillViewDrawer } from './BillViewDrawer';
-import { useDebounce } from '../../hooks/useDebounce';
 import { formatEntityLabel, truncateId } from '../../lib/entityLabel';
 import { loadErrorMessage } from '../../lib/api-error';
 import type { Bill, BillStatus, CreateBillInput, Customer } from '../../types';
@@ -38,8 +40,7 @@ const EMPTY_FORM: FormState = {
   notes: '',
 };
 
-function partyLabel(row: Bill, customerName: Map<string, string>): string {
-  if (row.walkInName) return row.walkInName;
+function customerLabel(row: Bill, customerName: Map<string, string>): string {
   if (row.customerId) {
     const name = customerName.get(row.customerId);
     if (name) return name;
@@ -48,9 +49,90 @@ function partyLabel(row: Bill, customerName: Map<string, string>): string {
   return '—';
 }
 
+function walkInLabel(row: Bill): string {
+  return row.walkInName || '—';
+}
+
 function money(n: number | undefined | null): string {
   if (n == null || Number.isNaN(Number(n))) return '—';
   return `$${Number(n).toFixed(2)}`;
+}
+
+function extractRef(notes: string | null | undefined): string {
+  if (!notes) return '—';
+  const m = notes.match(/(?:Ref|Pay ref): ([^·]+)/);
+  return m ? m[1].trim() : '—';
+}
+
+function formatDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatDateTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function isSameDay(d1: Date, d2: Date): boolean {
+  return (
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate()
+  );
+}
+
+function exportBillsCsv(rows: Bill[], customerName: Map<string, string>, locationName: Map<string, string>) {
+  const headers = [
+    'Bill #',
+    'Date',
+    'Customer',
+    'Walking Guest',
+    'Reference No.',
+    'Location',
+    'Status',
+    'Sale Type',
+    'Payment',
+    'Subtotal',
+    'Discount',
+    'Tax',
+    'Total',
+  ];
+
+  const csvRows = rows.map((r) => [
+    r.billNumber || truncateId(r.id),
+    r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '',
+    r.customerId ? (customerName.get(r.customerId) ?? truncateId(r.customerId)) : '',
+    r.walkInName ?? '',
+    extractRef(r.notes),
+    locationName.get(r.locationId) ?? truncateId(r.locationId),
+    r.status,
+    r.saleType ?? '',
+    r.paymentMethod ?? '',
+    Number(r.subtotal ?? 0).toFixed(2),
+    Number(r.discountAmount ?? 0).toFixed(2),
+    Number(r.taxAmount ?? 0).toFixed(2),
+    Number(r.totalAmount ?? 0).toFixed(2),
+  ]);
+
+  const escape = (v: string) => (v.includes(',') || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v);
+  const csv = [headers, ...csvRows].map((row) => row.map(escape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bills-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function BillsPage() {
@@ -61,26 +143,15 @@ export default function BillsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Bill | null>(null);
   const [statusFilter, setStatusFilter] = useState<BillStatus | 'ALL'>('ALL');
   const [locationFilter, setLocationFilter] = useState('');
-  const [customerQuery, setCustomerQuery] = useState('');
-  const debouncedCustomerQuery = useDebounce(customerQuery, 300);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const createMutation = Bills.useCreate();
   const removeMutation = Bills.useDelete();
   const { data: locations = [] } = Locations.useList();
-  // Customers have no reliable /list (pagination 400) — omitPagination search for name map.
   const { data: customersPage } = Customers.useSearch({});
   const customers = customersPage?.items ?? [];
-  const { data: customerSearch } = Customers.useSearch({
-    page: 1,
-    limit: 8,
-    search:
-      drawerOpen && !form.customerId && debouncedCustomerQuery.trim().length >= 2
-        ? debouncedCustomerQuery.trim()
-        : undefined,
-    enabled: drawerOpen && !form.customerId && debouncedCustomerQuery.trim().length >= 2,
-  });
-  // Bills SearchBillsRequest omits $page/$perPage (omitPagination) — single API default page only.
-  // /bills/list not switched: same family as search; omitPagination search remains the safe path.
+
   const filters = useMemo(() => {
     const next: Record<string, string> = {};
     if (statusFilter !== 'ALL') next.status = statusFilter;
@@ -90,7 +161,24 @@ export default function BillsPage() {
 
   const { data, isLoading, isError, error, refetch } = Bills.useSearch({ filters });
   const listError = isError ? loadErrorMessage(error, 'bills') : null;
-  const billRows = listError ? [] : (data?.items ?? []);
+
+  const allBillRows = listError ? [] : (data?.items ?? []);
+
+  const billRows = useMemo(() => {
+    let rows = allBillRows;
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      rows = rows.filter((r) => r.createdAt && new Date(r.createdAt) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      rows = rows.filter((r) => r.createdAt && new Date(r.createdAt) <= to);
+    }
+    return rows;
+  }, [allBillRows, dateFrom, dateTo]);
+
   const billCount = billRows.length;
 
   const locationName = useMemo(() => {
@@ -101,7 +189,7 @@ export default function BillsPage() {
     return m;
   }, [locations]);
 
-  const customerName = useMemo(() => {
+  const customerNameMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const c of customers) {
       m.set(c.id, formatEntityLabel({ name: c.name, phone: c.phone, id: c.id }));
@@ -114,7 +202,6 @@ export default function BillsPage() {
       ...EMPTY_FORM,
       locationId: locations[0]?.id ?? '',
     });
-    setCustomerQuery('');
     setDrawerOpen(true);
   };
 
@@ -144,16 +231,76 @@ export default function BillsPage() {
     });
   };
 
+  const handleCustomerSelect = (c: Customer) => {
+    setForm({
+      ...form,
+      customerId: c.id,
+      customerLabel: formatEntityLabel({ name: c.name, phone: c.phone, id: c.id }),
+      walkInName: '',
+      walkInPhone: '',
+    });
+  };
+
+  const saleTypeBadge = (type: string | undefined | null) => {
+    if (!type || type === 'normal') return null;
+    const cls =
+      type === 'credit'
+        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+        : 'bg-slate-500/15 text-slate-700 dark:text-slate-300';
+    return (
+      <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>
+        {type}
+      </span>
+    );
+  };
+
+  const statusBadge = (status: string) => {
+    const cls: Record<string, string> = {
+      COMPLETED: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+      DRAFT: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+      INITIATED: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
+      CANCELLED: 'bg-red-500/15 text-red-700 dark:text-red-400',
+    };
+    return (
+      <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase ${cls[status] ?? 'bg-muted text-muted-foreground'}`}>
+        {status}
+      </span>
+    );
+  };
+
   const columns: Column<Bill>[] = [
     {
       key: 'billNumber',
       label: 'Bill #',
-      render: (row) => row.billNumber || truncateId(row.id),
+      render: (row) => (
+        <span className="font-mono text-xs">{row.billNumber || truncateId(row.id)}</span>
+      ),
     },
     {
-      key: 'party',
+      key: 'createdAt',
+      label: 'Date',
+      render: (row) => (
+        <span className="text-xs">{formatDate(row.createdAt)}</span>
+      ),
+    },
+    {
+      key: 'customer',
       label: 'Customer',
-      render: (row) => partyLabel(row, customerName),
+      render: (row) => customerLabel(row, customerNameMap),
+    },
+    {
+      key: 'walkIn',
+      label: 'Walk-in',
+      render: (row) => (
+        <span className="text-muted-foreground">{walkInLabel(row)}</span>
+      ),
+    },
+    {
+      key: 'referenceNo',
+      label: 'Reference No.',
+      render: (row) => (
+        <span className="font-mono text-xs text-muted-foreground">{extractRef(row.notes)}</span>
+      ),
     },
     {
       key: 'locationId',
@@ -167,22 +314,51 @@ export default function BillsPage() {
     {
       key: 'status',
       label: 'Status',
-      render: (row) => row.status || '—',
+      render: (row) => (
+        <div className="flex items-center gap-1">
+          {statusBadge(row.status)}
+          {saleTypeBadge(row.saleType)}
+        </div>
+      ),
+    },
+    {
+      key: 'subtotal',
+      label: 'Gross Amt',
+      render: (row) => (
+        <span className="tabular-nums">{money(row.subtotal)}</span>
+      ),
+    },
+    {
+      key: 'discountAmount',
+      label: 'Discount',
+      render: (row) => (
+        <span className={`tabular-nums ${Number(row.discountAmount) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+          {Number(row.discountAmount) > 0 ? `-${money(row.discountAmount)}` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'taxAmount',
+      label: 'Tax',
+      render: (row) => (
+        <span className="tabular-nums text-muted-foreground">
+          {Number(row.taxAmount) > 0 ? money(row.taxAmount) : '—'}
+        </span>
+      ),
     },
     {
       key: 'totalAmount',
       label: 'Total',
-      render: (row) => money(row.totalAmount),
+      render: (row) => (
+        <span className="font-semibold tabular-nums">{money(row.totalAmount)}</span>
+      ),
     },
     {
       key: 'paymentMethod',
       label: 'Payment',
-      render: (row) => row.paymentMethod || '—',
-    },
-    {
-      key: 'createdAt',
-      label: 'Created',
-      render: (row) => row.createdAt ? new Date(row.createdAt).toLocaleString() : '—',
+      render: (row) => (
+        <span className="text-xs capitalize">{row.paymentMethod?.replace(/_/g, ' ').toLowerCase() ?? '—'}</span>
+      ),
     },
   ];
 
@@ -190,12 +366,9 @@ export default function BillsPage() {
 
   return (
     <div className="space-y-4" style={{ height: '100%' }}>
-      <p className="text-xs text-muted-foreground">
-        API gap: Bills have no free-text search — filter by status and location only.
-      </p>
       <DataTable
-        title="Bills"
-        description="Sales bills — create, review, then complete from detail or POS."
+        title="Sales Ledger"
+        description="All sales bills — filter by status, location, and date range."
         columns={columns}
         rows={billRows}
         total={billCount}
@@ -205,7 +378,7 @@ export default function BillsPage() {
         error={listError}
         onPageChange={() => {}}
         hideSearch
-        footerNote="Showing first page of results — refine filters/search; server pagination pending"
+        footerNote="Showing first page of results — refine filters; server pagination pending"
         toolbar={
           <>
             <span className="text-xs text-muted-foreground">Status:</span>
@@ -220,19 +393,57 @@ export default function BillsPage() {
                 {s === 'ALL' ? 'All' : s}
               </Button>
             ))}
-            <span className="ml-2 text-xs text-muted-foreground">Location:</span>
-            <select
-              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            <div className="h-5 w-px bg-border" />
+            <span className="text-xs text-muted-foreground">Location:</span>
+            <FormSelect
+              className="h-8 w-[200px] py-1.5"
               value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
+              onChange={setLocationFilter}
+              placeholder="All locations"
+              options={[
+                { value: '', label: 'All locations' },
+                ...locations.map((l) => ({
+                  value: l.id,
+                  label: l.type ? `${l.name} (${l.type})` : l.name,
+                })),
+              ]}
+            />
+            <div className="h-5 w-px bg-border" />
+            <span className="text-xs text-muted-foreground">From:</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+            />
+            <span className="text-xs text-muted-foreground">To:</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+            />
+            {(dateFrom || dateTo) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                }}
+              >
+                Clear dates
+              </Button>
+            )}
+            <div className="h-5 w-px bg-border" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => exportBillsCsv(billRows, customerNameMap, locationName)}
+              disabled={billRows.length === 0}
             >
-              <option value="">All locations</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.type ? `${l.name} (${l.type})` : l.name}
-                </option>
-              ))}
-            </select>
+              <Download size={14} /> Export CSV
+            </Button>
           </>
         }
         onRefetch={() => void refetch()}
@@ -255,7 +466,7 @@ export default function BillsPage() {
               })
             : undefined
         }
-        partyLabel={viewRow ? partyLabel(viewRow, customerName) : undefined}
+        partyLabel={viewRow ? customerLabel(viewRow, customerNameMap) : undefined}
         onClose={() => setViewRow(null)}
       />
 
@@ -284,19 +495,15 @@ export default function BillsPage() {
             walk-in name. Add items and complete on the detail page or via POS.
           </p>
           <Field label="Location">
-            <select
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            <FormSelect
               value={form.locationId}
-              onChange={(e) => setForm({ ...form, locationId: e.target.value })}
-              required
-            >
-              <option value="">Select location…</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.type ? `${l.name} (${l.type})` : l.name}
-                </option>
-              ))}
-            </select>
+              onChange={(locationId) => setForm({ ...form, locationId })}
+              placeholder="Select location…"
+              options={locations.map((l) => ({
+                value: l.id,
+                label: l.type ? `${l.name} (${l.type})` : l.name,
+              }))}
+            />
           </Field>
           <Field label="Customer (search)">
             {form.customerId ? (
@@ -314,43 +521,13 @@ export default function BillsPage() {
                 </Button>
               </div>
             ) : (
-              <div className="space-y-1">
-                <Input
-                  value={customerQuery}
-                  onChange={(e) => setCustomerQuery(e.target.value)}
-                  placeholder="Type name to search…"
-                />
-                {(customerSearch?.items?.length ?? 0) > 0 && (
-                  <div className="max-h-36 overflow-y-auto rounded-md border border-border">
-                    {(customerSearch?.items ?? []).map((c: Customer) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => {
-                          setForm({
-                            ...form,
-                            customerId: c.id,
-                            customerLabel: formatEntityLabel({
-                              name: c.name,
-                              phone: c.phone,
-                              id: c.id,
-                            }),
-                            walkInName: '',
-                            walkInPhone: '',
-                          });
-                          setCustomerQuery('');
-                        }}
-                      >
-                        {c.name || 'Unnamed'}
-                        {c.phone ? (
-                          <span className="ml-2 text-xs text-muted-foreground">{c.phone}</span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <CustomerPicker
+                customerId={form.customerId}
+                onSelect={handleCustomerSelect}
+                onClear={() => setForm({ ...form, customerId: '', customerLabel: '' })}
+                placeholder="Type name to search…"
+                size="md"
+              />
             )}
           </Field>
           {!form.customerId && (

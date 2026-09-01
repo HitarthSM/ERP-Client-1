@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Mail, Link, Plus, X } from 'lucide-react';
+import { Mail, Link } from 'lucide-react';
 import { FormDrawer, Field } from '../../../components/FormDrawer';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
-import { ClerkUsers } from '../../../api';
-import { PRESET_ROLES } from './UpdateRolesDrawer';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
+import { ClerkUsers, useListRoles, Locations, Organizations } from '../../../api';
+import { useSession } from '../../../context/SessionContext';
 import type { InviteUserPayload } from '../../../types';
 
 interface Props {
@@ -12,56 +13,58 @@ interface Props {
   onClose: () => void;
 }
 
-const EMPTY: InviteUserPayload = { email: '', roles: [], redirectUrl: '' };
+const ORG_WIDE = '__org_wide__';
+const EMPTY: InviteUserPayload = { email: '', roleId: '', organizationId: undefined, locationId: undefined, redirectUrl: '' };
 
 export function InviteUserDrawer({ open, onClose }: Props) {
   const [form, setForm] = useState<InviteUserPayload>(EMPTY);
-  const [roles, setRoles] = useState<string[]>([]);
-  const [custom, setCustom] = useState('');
+  const { isSuperAdmin } = useSession();
   const inviteMutation = ClerkUsers.useInvite();
+  const { data: roles = [] } = useListRoles();
+  const { data: orgs = [] } = Organizations.useList(isSuperAdmin);
+  const { data: orgLocations = [] } = Locations.useList(!isSuperAdmin);
+  const scopedLocations = Locations.useSearch({
+    limit: 100,
+    filters: form.organizationId ? { organizationId: form.organizationId } : {},
+    enabled: isSuperAdmin && !!form.organizationId,
+  });
+  const locations = isSuperAdmin ? (scopedLocations.data?.items ?? []) : orgLocations;
+  const invitableRoles = roles.filter((r) => r.name !== 'super_admin');
 
   const close = () => {
     setForm(EMPTY);
-    setRoles([]);
-    setCustom('');
     onClose();
-  };
-
-  const toggleRole = (role: string) =>
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
-
-  const addCustomRole = () => {
-    const r = custom.trim().toLowerCase();
-    if (!r || roles.includes(r)) { setCustom(''); return; }
-    setRoles((prev) => [...prev, r]);
-    setCustom('');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     inviteMutation.mutate(
       {
-        email:       form.email.trim(),
-        roles:       roles.length ? roles : undefined,
-        redirectUrl: form.redirectUrl?.trim() || undefined,
+        email:          form.email.trim(),
+        roleId:         form.roleId,
+        organizationId: isSuperAdmin ? form.organizationId : undefined,
+        locationId:     form.locationId || undefined,
+        redirectUrl:    form.redirectUrl?.trim() || undefined,
       },
       { onSuccess: close },
     );
   };
+
+  const canSubmit =
+    !inviteMutation.isPending &&
+    !!form.email.trim() &&
+    !!form.roleId &&
+    (!isSuperAdmin || !!form.organizationId);
 
   return (
     <FormDrawer
       open={open}
       onClose={close}
       title="Invite User"
-      subtitle="Send a Clerk email invitation. The user will be prompted to sign up."
+      subtitle="Send a Clerk email invitation. Accepting it joins your organization with the role and store picked here."
       footer={
         <>
-          <Button
-            type="submit"
-            form="invite-user-form"
-            disabled={inviteMutation.isPending || !form.email.trim()}
-          >
+          <Button type="submit" form="invite-user-form" disabled={!canSubmit}>
             {inviteMutation.isPending ? 'Sending…' : 'Send Invitation'}
           </Button>
           <Button type="button" variant="outline" onClick={close}>
@@ -86,37 +89,52 @@ export function InviteUserDrawer({ open, onClose }: Props) {
           </div>
         </Field>
 
-        <Field label="Roles (optional)" hint="Stored in Clerk publicMetadata.">
-          <div className="flex flex-wrap gap-2 pt-1">
-            {PRESET_ROLES.map((r) => {
-              const active = roles.includes(r);
-              return (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => toggleRole(r)}
-                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors capitalize ${
-                    active
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                  }`}
-                >
-                  {r}
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex gap-2">
-            <Input
-              placeholder="Add custom role"
-              value={custom}
-              onChange={(e) => setCustom(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomRole())}
-            />
-            <Button type="button" size="sm" variant="outline" onClick={addCustomRole}>
-              <Plus size={14} /> Add
-            </Button>
-          </div>
+        {isSuperAdmin && (
+          <Field label="Organization" required hint="SuperAdmin accounts are org-less — pick the company this hire joins.">
+            <Select
+              value={form.organizationId || undefined}
+              onValueChange={(v) => setForm({ ...form, organizationId: v, locationId: undefined })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select organization" />
+              </SelectTrigger>
+              <SelectContent>
+                {orgs.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+
+        <Field label="Role" required hint="Determines what they can access once they accept.">
+          <Select value={form.roleId} onValueChange={(v) => setForm({ ...form, roleId: v })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a role" />
+            </SelectTrigger>
+            <SelectContent>
+              {invitableRoles.map((r) => (
+                <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <Field label="Store (optional)" hint="Scope the role to one store/warehouse. Leave blank for org-wide access.">
+          <Select
+            value={form.locationId ?? ORG_WIDE}
+            onValueChange={(v) => setForm({ ...form, locationId: v === ORG_WIDE ? undefined : v })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Org-wide (no store)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ORG_WIDE}>Org-wide (no store)</SelectItem>
+              {locations.map((l) => (
+                <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
 
         <Field
@@ -134,30 +152,6 @@ export function InviteUserDrawer({ open, onClose }: Props) {
             />
           </div>
         </Field>
-
-        {roles.length > 0 && (
-          <div className="rounded-md border border-border bg-muted/30 p-3">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Selected roles</p>
-            <div className="flex flex-wrap gap-1.5">
-              {roles.map((r) => (
-                <span
-                  key={r}
-                  className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary capitalize"
-                >
-                  {r}
-                  <button
-                    type="button"
-                    onClick={() => setRoles((prev) => prev.filter((x) => x !== r))}
-                    className="ml-0.5 rounded-full hover:bg-primary/20"
-                    aria-label={`Remove ${r}`}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </form>
     </FormDrawer>
   );

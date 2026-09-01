@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Printer } from 'lucide-react';
+import { ArrowLeft, Download, Printer, ShoppingCart } from 'lucide-react';
 import { ErrorState } from '../../components/errors/ErrorState';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Bills, Customers, Locations, Products } from '../../api';
+import { useAuth } from '../../context/AuthContext';
 import { formatEntityLabel, truncateId } from '../../lib/entityLabel';
 import { billToPosReceipt, downloadSaleDoc, printSaleDoc } from '../pos/billReceipt';
 import type { BillStatus, PaymentMethod } from '../../types';
@@ -19,6 +20,12 @@ const PAY_METHODS: PaymentMethod[] = ['CASH', 'CARD', 'UPI', 'NET_BANKING', 'CHE
 export default function BillDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const orgBrand = {
+    orgName: user?.organization?.name,
+    logoUrl: user?.organization?.logoUrl,
+    orgMeta: user?.organization?.slug,
+  };
 
   const { data: bill, isLoading, error, refetch } = Bills.useGet(id);
   const { data: locations = [] } = Locations.useList();
@@ -148,12 +155,22 @@ export default function BillDetail() {
           <p className="text-muted-foreground text-xs mt-1">ID: {bill.id}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {isDraft && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => navigate(`/pos/sales?resumeBillId=${bill.id}`)}
+            >
+              <ShoppingCart size={14} className="mr-1" /> Continue on New Sale
+            </Button>
+          )}
           <Button
             type="button"
             size="sm"
             variant="outline"
             onClick={() => {
               const receipt = billToPosReceipt(bill, {
+                ...orgBrand,
                 locationName,
                 partyLabel: party,
                 productLabel: (productId) => productName.get(productId) ?? productId,
@@ -169,6 +186,7 @@ export default function BillDetail() {
             variant="outline"
             onClick={() => {
               const receipt = billToPosReceipt(bill, {
+                ...orgBrand,
                 locationName,
                 partyLabel: party,
                 productLabel: (productId) => productName.get(productId) ?? productId,

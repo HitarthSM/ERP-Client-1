@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuItem,
 } from './ui/dropdown-menu';
+import { TruncatedLabel } from './TruncatedLabel';
 
 export interface SelectOption {
   value: string;
@@ -42,13 +43,16 @@ export function FormSelect({
           type="button"
           disabled={disabled || loading}
           className={cn(
-            'flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm',
+            'flex w-full min-w-0 items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm',
             'focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
             !selected && 'text-muted-foreground',
             className,
           )}
         >
-          <span className="truncate">{loading ? 'Loading…' : (selected?.label ?? placeholder)}</span>
+          <TruncatedLabel
+            className="min-w-0 flex-1 text-left"
+            text={loading ? 'Loading…' : (selected?.label ?? placeholder)}
+          />
           <ChevronDown size={14} className="ml-2 shrink-0 opacity-50" />
         </button>
       </DropdownMenuTrigger>
@@ -64,9 +68,9 @@ export function FormSelect({
           <DropdownMenuItem
             key={opt.value}
             onSelect={() => { onChange(opt.value); setOpen(false); }}
-            className={cn('gap-2 cursor-pointer', opt.value === value && 'text-primary focus:text-primary')}
+            className={cn('gap-2 cursor-pointer min-w-0', opt.value === value && 'text-primary focus:text-primary')}
           >
-            <span className="flex-1">{opt.label}</span>
+            <TruncatedLabel className="flex-1" text={opt.label} />
             {opt.value === value && <Check size={13} className="shrink-0" />}
           </DropdownMenuItem>
         ))}

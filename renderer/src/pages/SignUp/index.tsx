@@ -7,11 +7,13 @@ import { clerkErrorMessage, signUpWithPassword, startGoogleOAuth } from '../../l
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import AuthBootScreen from '../../components/auth/AuthBootScreen';
 import LoginVisualPanel from '../../components/auth/LoginVisualPanel';
+import { getAppName } from '../../lib/branding';
 import { toast } from 'sonner';
 
 export default function SignUp() {
-  const { user } = useAuth();
+  const { user, syncing, bootPhase } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,6 +21,10 @@ export default function SignUp() {
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+
+  if (syncing && clerk.session) {
+    return <AuthBootScreen phase={bootPhase ?? 'session'} />;
+  }
 
   if (user) {
     return <Navigate to="/" replace />;
@@ -71,7 +77,7 @@ export default function SignUp() {
       <div className="flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto">
         <div className="w-full max-w-md">
           <div className="mb-8">
-            <h1 className="text-2xl font-semibold tracking-tight mb-1 lg:hidden">Core ERP Client</h1>
+            <h1 className="text-2xl font-semibold tracking-tight mb-1 lg:hidden">{getAppName()}</h1>
             <p className="text-muted-foreground">Create your account</p>
           </div>
 

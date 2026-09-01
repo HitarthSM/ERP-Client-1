@@ -127,6 +127,19 @@ export async function del(path: string): Promise<void> {
   await request<void>(resp);
 }
 
+export async function getBlob(path: string, params?: QueryParams): Promise<{ blob: Blob; filename: string }> {
+  const resp = await fetch(buildUrl(path, params), { headers: await authHeader() });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    checkAuth(resp.status);
+    throw new HttpError(resp.status, text || `HTTP ${resp.status}`, undefined);
+  }
+  const disposition = resp.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^";\n]+)"?/.exec(disposition);
+  const filename = match?.[1] ?? 'download.pdf';
+  return { blob: await resp.blob(), filename };
+}
+
 export async function uploadForm<T>(path: string, form: FormData): Promise<T> {
   const resp = await fetch(buildUrl(path), { method: 'POST', headers: await authHeader(), body: form });
   return request<T>(resp);

@@ -116,6 +116,8 @@ export interface Product {
   wholesalePrice?: number;
   transferPrice?: number;
   reorderPoint?: number;
+  manufacturer?: string;
+  packSize?: number;
   isActive?: boolean;
   createdAt?: string;
 }
@@ -169,6 +171,12 @@ export interface InventoryItem {
   maxStock?: number;
   averageCost?: number;
   binLocation?: string;
+  /** Pack size from product — null when product has no pack concept */
+  productPackSize?: number;
+  /** Whole packs on hand = floor(quantityOnHand / productPackSize). Null when no pack size. */
+  packsOnHand?: number;
+  /** Loose units beyond whole packs = quantityOnHand % productPackSize. Null when no pack size. */
+  looseUnits?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -186,12 +194,18 @@ export interface Supplier {
   updatedAt?: string;
 }
 
-export type PurchaseOrderStatus = 'draft' | 'ordered' | 'partially_received' | 'received' | 'cancelled';
+export type PurchaseOrderStatus =
+  | 'draft'
+  | 'ordered'
+  | 'partially_received'
+  | 'received'
+  | 'partially_allocated'
+  | 'allocated'
+  | 'cancelled';
 
 export interface PurchaseOrder {
   id: string;
   organizationId?: string;
-  locationId?: string;
   supplierId?: string;
   createdById?: string;
   poNumber?: string;
@@ -206,12 +220,14 @@ export interface PurchaseOrder {
 
 export interface CreatePurchaseOrderItemInput {
   productId: string;
-  quantityOrdered: number;
+  /** Units ordered — omit when packQuantity is provided */
+  quantityOrdered?: number;
   unitCost: number;
+  /** Packs ordered — backend converts to units using product packSize */
+  packQuantity?: number;
 }
 
 export interface CreatePurchaseOrderInput {
-  locationId: string;
   supplierId: string;
   expectedAt?: string;
   notes?: string;
@@ -224,8 +240,18 @@ export interface ReceivePurchaseOrderItemInput {
 }
 
 export interface ReceivePurchaseOrderInput {
-  locationId: string;
   items: ReceivePurchaseOrderItemInput[];
+  notes?: string;
+}
+
+export interface AllocatePurchaseOrderItemInput {
+  purchaseItemId: string;
+  locationId: string;
+  quantity: number;
+}
+
+export interface AllocatePurchaseOrderInput {
+  allocations: AllocatePurchaseOrderItemInput[];
   notes?: string;
 }
 
@@ -372,11 +398,40 @@ export interface ItemReturn {
   createdAt?: string;
 }
 
+export type EReportPeriod = 'DAILY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM';
+
+export type EReportType =
+  | 'total_sales' | 'cash_sales' | 'credit_sales' | 'total_bills' | 'average_bill_value'
+  | 'time_wise_sales' | 'top_selling_products' | 'slow_moving_products'
+  | 'total_expense' | 'shop_expense' | 'other_expense' | 'opening_cash' | 'closing_cash'
+  | 'total_purchase' | 'purchase_return' | 'total_profit' | 'net_profit'
+  | 'closing_stock' | 'low_stock_items' | 'out_of_stock_items' | 'damaged_stock' | 'returned_items'
+  | 'total_customers' | 'new_customers' | 'repeat_customers'
+  | 'credit_given' | 'credit_received' | 'pending_credit'
+  | 'supplier_payment' | 'pending_supplier_payment' | 'staff_attendance' | 'weekly_comparison';
+
 export interface ReportGenerationLog {
   id: string;
-  report_type?: string;
+  orgId?: string;
+  reportType?: EReportType;
+  reportPeriod?: EReportPeriod;
+  reportName?: string;
+  fromDate?: string;
+  toDate?: string;
+  locationId?: string;
+  generatedById?: string;
   status?: string;
-  created_at?: string;
+  fileUrl?: string;
+  errorMessage?: string;
+  createdAt?: string;
+}
+
+export interface GenerateReportInput {
+  reportType: EReportType;
+  reportPeriod: EReportPeriod;
+  fromDate: string;
+  toDate: string;
+  locationId?: string;
 }
 
 // Matches core-apis StockMovementResponse + StockOperationRequest / AdjustStockRequest.
@@ -474,6 +529,28 @@ export interface StockTransfer {
   items?: StockTransferItem[];
 }
 
+export interface StockTransferRequest {
+  id: string;
+  organizationId: string;
+  requestingLocationId: string;
+  requestingUserId?: string;
+  productId: string;
+  variantId?: string;
+  quantityRequested: number;
+  status: string;
+  acceptedByLocationId?: string;
+  acceptedByUserId?: string;
+  acceptedAt?: string;
+  claimedAt?: string;
+  cancelledByUserId?: string;
+  cancelledAt?: string;
+  fulfillmentTransferId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  canFulfill?: boolean;
+  availableStock?: number;
+}
+
 // Verified 2026-07-26 against core-apis's OrderResponse/CreateOrderRequest source
 // directly — camelCase, matches the entity well. OrderEntity has no organizationId
 // column (tenancy flows through locationId -> location -> org). The real blocker for
@@ -505,6 +582,8 @@ export interface Invoice {
 }
 
 // core-apis customers: create sets organizationId from auth/fallback; search/PATCH/DELETE supported.
+export type CreditStatus = 'none' | 'available' | 'warning' | 'over';
+
 export interface Customer {
   id: string;
   organizationId?: string;
@@ -512,13 +591,52 @@ export interface Customer {
   email?: string;
   phone?: string;
   gstin?: string;
+  address?: string;
+  pinCode?: string;
+  shopName?: string;
   creditLimit?: number | null;
   creditBalance?: number;
   customerType?: CustomerType | string | null;
   discountPercent?: number | null;
   skipOverLimitApproval?: boolean | null;
+  creditStatus?: CreditStatus;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface CustomerCreditTransaction {
+  id: string;
+  customerId: string;
+  type: 'credit_sale' | 'payment' | 'adjustment';
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  billId?: string | null;
+  paymentMethod?: string | null;
+  note?: string | null;
+  performedById?: string | null;
+  createdAt: string;
+}
+
+export interface CreditTransactionDocument {
+  id: string;
+  customerId: string;
+  customerName: string | null;
+  billId: string | null;
+  billNumber: string | null;
+  walkInName: string | null;
+  type: 'credit_sale' | 'payment' | 'adjustment';
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  paymentMethod: string | null;
+  note: string | null;
+  subtotal: number | null;
+  discountAmount: number | null;
+  taxAmount: number | null;
+  totalAmount: number | null;
+  billedAt: string | null;
+  createdAt: string;
 }
 
 export interface QuickCharge {
@@ -595,8 +713,13 @@ export interface PurchaseItem {
   productId?: string;
   quantityOrdered?: number;
   quantityReceived?: number;
+  quantityAllocated?: number;
   unitCost?: number;
   totalCost?: number;
+  /** Packs entered at order time — null when ordered in units */
+  packQuantity?: number;
+  /** Product packSize snapshotted at order time — null when no pack concept used */
+  packSizeSnapshot?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -624,7 +747,7 @@ export interface ActivityLog {
 // values, unique) — free text will fail. organizationId/permissions are required by
 // CreateRoleRequest validation but RoleEntity has no matching columns, so the backend
 // silently discards them after accepting the request.
-export const ROLE_NAMES = ['super_admin', 'org_admin', 'store_manager', 'store_staff'] as const;
+export const ROLE_NAMES = ['super_admin', 'org_admin', 'org_manager', 'store_manager', 'store_staff'] as const;
 
 export interface Role {
   id: string;
@@ -709,7 +832,9 @@ export interface ClerkUserRolesResponse {
 
 export interface InviteUserPayload {
   email: string;
-  roles?: string[];
+  roleId: string;
+  organizationId?: string;
+  locationId?: string;
   redirectUrl?: string;
 }
 
@@ -873,6 +998,25 @@ export interface SalesSummaryData {
   activeCustomers: number;
   completedBills: number;
   pendingBills: number;
+  totalUnitsSold: number;
+  comparisonLabel?: string;
+  previous?: {
+    completedBills: number;
+    activeCustomers: number;
+    totalUnitsSold: number;
+    revenue: number;
+    avgBillValue: number;
+  };
+  topSelling?: SalesProductHighlight;
+  topMargin?: SalesProductHighlight;
+  topCostly?: SalesProductHighlight;
+}
+
+export interface SalesProductHighlight {
+  productId: string;
+  productName: string;
+  currentValue: number;
+  previousValue: number;
 }
 
 export interface RevenueTrendPoint {
@@ -931,9 +1075,78 @@ export interface StockByLocationPoint {
   valuation: number;
 }
 
-export * from './features/auth/types';
-export * from './features/inventory/types';
-export * from './features/purchasing/types';
-export * from './features/sales/types';
-export * from './features/fleet/types';
-export * from './features/core/types';
+export interface PaymentMixPoint {
+  method: string;
+  amount: number;
+}
+
+export interface CategoryValuePoint {
+  categoryId?: string;
+  categoryName: string;
+  value: number;
+}
+
+export interface PurchaseExceptionsData {
+  pending: number;
+  approvalPending: number;
+  priceIncreased: number;
+}
+
+export interface DemandTierPoint {
+  tier: string;
+  count: number;
+}
+
+export interface ProductMovementRank {
+  productId: string;
+  productName: string;
+  quantity: number;
+  value: number;
+}
+
+export interface ProductMarginRank {
+  productId: string;
+  productName: string;
+  totalMargin: number;
+  totalRevenue: number;
+  avgUnitPrice: number;
+}
+
+export interface SupplierPricePoint {
+  productId: string;
+  productName: string;
+  supplierId: string;
+  supplierName: string;
+  avgUnitCost: number;
+}
+
+export interface InventoryStatusData {
+  normal: number;
+  low: number;
+  out: number;
+  over: number;
+  dead: number;
+}
+
+export interface InventoryStatusTrendPoint {
+  period: string;
+  normal: number;
+  low: number;
+  out: number;
+  over: number;
+  dead: number;
+}
+
+export interface StockDamageSummaryData {
+  totalUnits: number;
+  eventCount: number;
+  topProducts: ProductMovementRank[];
+}
+
+export interface DashboardAnalyticsParams {
+  period?: string;
+  from?: string;
+  to?: string;
+  locationId?: string;
+}
+

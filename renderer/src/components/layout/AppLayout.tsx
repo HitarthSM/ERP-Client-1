@@ -9,6 +9,7 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const isPos = /^\/pos(\/.*)?$/.test(location.pathname);
+  const fillHeight = isPos || location.pathname === '/sales/creditors';
 
   return (
     <div className="h-screen w-full flex overflow-hidden bg-background text-foreground">
@@ -18,12 +19,12 @@ export default function AppLayout() {
         <Topbar />
         <main
           className={
-            isPos
+            fillHeight
               ? 'flex-1 min-h-0 overflow-hidden'
               : 'flex-1 min-h-0 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable]'
           }
         >
-          <div className={isPos ? 'h-full min-h-0 w-full' : 'w-full px-3 py-3'}>
+          <div className={fillHeight ? 'h-full min-h-0 w-full' : 'w-full px-3 py-3'}>
             <PageAccessGate />
           </div>
         </main>

@@ -8,6 +8,7 @@ import { FormDrawer, Field } from '../../components/FormDrawer';
 import { ViewDrawer } from '../../components/ViewDrawer';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { FormSelect } from '../../components/FormSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import {
   ItemReturns,
@@ -281,21 +282,22 @@ export default function ItemReturnsPage() {
               </Button>
             ))}
             <span className="ml-2 text-xs text-muted-foreground">Location:</span>
-            <select
-              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            <FormSelect
+              className="h-8 w-[200px] py-1.5"
               value={storeFilter}
-              onChange={(e) => {
-                setStoreFilter(e.target.value);
+              onChange={(v) => {
+                setStoreFilter(v);
                 setPage(1);
               }}
-            >
-              <option value="">All locations</option>
-              {(locations ?? []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.type ? `${l.name} (${l.type})` : formatEntityLabel({ name: l.name, id: l.id })}
-                </option>
-              ))}
-            </select>
+              placeholder="All locations"
+              options={[
+                { value: '', label: 'All locations' },
+                ...(locations ?? []).map((l) => ({
+                  value: l.id,
+                  label: l.type ? `${l.name} (${l.type})` : formatEntityLabel({ name: l.name, id: l.id }),
+                })),
+              ]}
+            />
           </>
         }
         onRefetch={() => void refetch()}
@@ -445,7 +447,7 @@ export default function ItemReturnsPage() {
               resource={Inventory}
               getLabel={(i) =>
                 `${productName.get(i.productId) ?? formatEntityLabel({ id: i.productId })} @ ${
-                  locationName.get(i.locationId) ?? formatEntityLabel({ id: i.locationId })
+                  locationLookup.get(i.locationId) ?? formatEntityLabel({ id: i.locationId })
                 }`
               }
               value={restockForm.inventoryId}

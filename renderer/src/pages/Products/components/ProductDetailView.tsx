@@ -240,6 +240,16 @@ export function ProductDetailView({ productId, categoryName, allSuppliers, onClo
                     <span className="text-sm font-medium">{product?.unit || '—'}</span>
                   </InfoField>
 
+                  <InfoField label="Manufacturer / Brand">
+                    <span className="text-sm font-medium">{product?.manufacturer || '—'}</span>
+                  </InfoField>
+
+                  <InfoField label="Pack Size">
+                    <span className="text-sm font-medium">
+                      {product?.packSize != null ? `${product.packSize} units/pack` : '—'}
+                    </span>
+                  </InfoField>
+
                   <InfoField label="Barcode">
                     {product?.barcode ? (
                       <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">

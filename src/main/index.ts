@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import { existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { app, BrowserWindow, dialog, Menu, ipcMain } from 'electron';
 import { version as APP_VERSION } from '../../package.json';
@@ -6,8 +7,39 @@ import { initSettingsStore, loadSettings, saveSettings } from './settings-store'
 import { initAutoUpdater } from './auto-updater';
 import { startStaticServer, stopStaticServer, STATIC_SERVER_ORIGIN } from './static-server';
 
+const DEFAULT_APP_NAME = 'Pramukh Digital';
+
+/** Load root `.env` into process.env when missing (dev / unpackaged). */
+function loadRootEnv(): void {
+  const envPath = path.join(__dirname, '../../.env');
+  if (!existsSync(envPath)) return;
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+
+loadRootEnv();
+
+const APP_NAME = process.env.APP_NAME?.trim() || DEFAULT_APP_NAME;
+
+function resolveAppIcon(): string | undefined {
+  for (const candidate of [
+    path.join(__dirname, '../../assets/icon.ico'),
+    path.join(__dirname, '../../assets/app-logo.png'),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 // Keep dev and packaged on same AppData folder
-app.setName('Core ERP Client');
+app.setName(APP_NAME);
 
 let mainWindow: BrowserWindow | null = null;
 const isDev = process.env.NODE_ENV === 'development';
@@ -115,6 +147,7 @@ function registerAppIpc(): void {
 }
 
 async function createWindow(): Promise<void> {
+  const icon = resolveAppIcon();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -127,7 +160,8 @@ async function createWindow(): Promise<void> {
     },
     backgroundColor: '#0f172a',
     show: false,
-    title: `Core ERP Client v${APP_VERSION}`,
+    title: `${APP_NAME} v${APP_VERSION}`,
+    ...(icon ? { icon } : {}),
   });
 
   // Suppress default menu in production
@@ -161,7 +195,7 @@ app.whenReady().then(async () => {
       await startStaticServer(rendererDir);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      dialog.showErrorBox('Core ERP Client — Startup Error', message);
+      dialog.showErrorBox(`${APP_NAME} — Startup Error`, message);
       app.quit();
       return;
     }

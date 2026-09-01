@@ -40,12 +40,7 @@ export function PageAccessGate() {
   }
 
   if (hasConfigs && pageKey && !canAccess(pageKey)) {
-    return (
-      <div className="min-h-[40vh] flex flex-col items-center justify-center gap-2 px-6 text-center">
-        <p className="text-lg font-semibold">You don't have access to this page</p>
-        <p className="text-sm text-muted-foreground">Ask an admin to grant access, or open a page from the sidebar.</p>
-      </div>
-    );
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

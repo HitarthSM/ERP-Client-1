@@ -12,6 +12,7 @@ import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import {
   Locations,
+  Organizations,
   useUploadLocationImage,
   useRemoveLocationImage,
   useListCountries,
@@ -19,6 +20,7 @@ import {
   useListCities,
 } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
+import { useSession } from '../../context/SessionContext';
 import type { Location, LocationType } from '../../types';
 
 const TYPE_OPTIONS: LocationType[] = ['store', 'warehouse'];
@@ -33,6 +35,7 @@ interface FormState {
   stateId: number | null;
   cityName: string;
   phone: string;
+  organizationId: string;
 }
 
 interface PendingImage { file: File; previewUrl: string }
@@ -44,10 +47,12 @@ const EMPTY_FORM: FormState = {
   stateName: '', stateId: null,
   cityName: '',
   phone: '',
+  organizationId: '',
 };
 
 export default function LocationsPage() {
   const { pathname } = useLocation();
+  const { isSuperAdmin } = useSession();
   const warehouseOnly = pathname.startsWith('/warehouse');
   const storeOnly     = pathname.startsWith('/stores');
   const emptyForm: FormState = warehouseOnly
@@ -77,6 +82,7 @@ export default function LocationsPage() {
   const removeMutation      = Locations.useDelete();
   const uploadImageMutation = useUploadLocationImage();
   const removeImageMutation = useRemoveLocationImage();
+  const { data: orgs = [] } = Organizations.useList(isSuperAdmin);
 
   const { page, setPage, setSearch, debouncedSearch } = usePagination();
 
@@ -119,6 +125,7 @@ export default function LocationsPage() {
       stateId:     null,
       cityName:    row.city        ?? '',
       phone:       row.phone       ?? '',
+      organizationId: row.organizationId ?? '',
     });
     setServerImage(!!row.imageKey);
     clearPending();
@@ -165,10 +172,15 @@ export default function LocationsPage() {
       state:   form.stateName  || undefined,
       country: form.countryName || undefined,
       phone:   form.phone  || undefined,
+      organizationId: isSuperAdmin && !editing ? form.organizationId || undefined : undefined,
     };
     if (editing) {
       updateMutation.mutate({ id: editing.id, body }, { onSuccess: closeDrawer });
     } else {
+      if (isSuperAdmin && !form.organizationId) {
+        toast.error('Select an organization');
+        return;
+      }
       const queued = pendingImage?.file;
       createMutation.mutate(body, {
         onSuccess: async (created) => {
@@ -264,6 +276,20 @@ export default function LocationsPage() {
         }
       >
         <form id="location-form" onSubmit={handleSubmit} className="space-y-4">
+          {isSuperAdmin && !editing && (
+            <Field label="Organization" required>
+              <Select
+                value={form.organizationId || undefined}
+                onValueChange={(v) => setForm({ ...form, organizationId: v })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select organization…" /></SelectTrigger>
+                <SelectContent>
+                  {orgs.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+
           <Field label="Name" required>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus />
           </Field>

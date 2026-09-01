@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import { getAppName } from '../lib/branding';
 
 type UpdateState =
   | { status: 'idle' }
@@ -71,7 +72,7 @@ export function UpdateBanner() {
   const handleInstall = async () => {
     if (
       !confirm(
-        'Restart Core ERP Client now to install the update? Unsaved local work may be lost.',
+        `Restart ${getAppName()} now to install the update? Unsaved local work may be lost.`,
       )
     ) {
       return;

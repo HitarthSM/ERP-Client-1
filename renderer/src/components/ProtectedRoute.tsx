@@ -5,17 +5,20 @@ import AuthBootScreen from './auth/AuthBootScreen';
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, syncing, bootPhase } = useAuth();
 
-  // Clerk session can exist before /me finishes on first load — wait instead of bouncing to /login.
-  // Once a user is already loaded, a background re-sync (e.g. Clerk's periodic
-  // token refresh) must not blank out the already-authenticated app.
-  if (syncing && !user) {
+  // Wait until Clerk session → backend /me validation finishes. Cached user from
+  // localStorage must not render the app before the token is confirmed — otherwise
+  // parallel API calls can 401 and force an immediate logout back to /login.
+  // Background re-sync only runs on session id change (sign-in/out), not periodic
+  // token refresh, so blocking on syncing here won't blank the app every ~60s.
+  if (syncing) {
     return <AuthBootScreen phase={bootPhase ?? 'session'} />;
   }
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  if (!user.organization) {
+  const isSuperAdmin = user.roles?.includes('super_admin');
+  if (!user.organization && !isSuperAdmin) {
     return <Navigate to="/onboarding/create-org" replace />;
   }
 

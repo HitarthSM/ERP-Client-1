@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { FormDrawer } from '../../components/FormDrawer';
 import { Button } from '../../components/ui/button';
 import { Bills, Products } from '../../api';
+import { useAuth } from '../../context/AuthContext';
 import { formatEntityLabel } from '../../lib/entityLabel';
 import { ReceiptDocument } from '../pos/ReceiptDocument';
 import { billToPosReceipt, downloadSaleDoc, printSaleDoc } from '../pos/billReceipt';
@@ -19,6 +20,7 @@ export function BillViewDrawer({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: bill, isLoading } = Bills.useGet(billId ?? undefined);
   const { data: products = [] } = Products.useList();
 
@@ -28,7 +30,14 @@ export function BillViewDrawer({
   };
 
   const receipt = bill
-    ? billToPosReceipt(bill, { locationName, partyLabel, productLabel })
+    ? billToPosReceipt(bill, {
+        locationName,
+        partyLabel,
+        productLabel,
+        orgName: user?.organization?.name,
+        logoUrl: user?.organization?.logoUrl,
+        orgMeta: user?.organization?.slug,
+      })
     : null;
 
   return (
@@ -37,7 +46,7 @@ export function BillViewDrawer({
       onClose={onClose}
       title="View Bill"
       subtitle={bill?.status ? String(bill.status) : undefined}
-      width={420}
+      width={900}
       footer={
         <div className="flex w-full flex-col gap-2">
           <div className="flex gap-2">

@@ -1,4 +1,5 @@
 import { Check, Loader2 } from 'lucide-react';
+import { getAppName } from '../../lib/branding';
 
 export type AuthBootPhase = 'starting' | 'session' | 'sync' | 'profile';
 
@@ -26,11 +27,12 @@ type Props = {
 };
 
 export default function AuthBootScreen({ phase = 'starting', title }: Props) {
+  const appName = getAppName();
   const active = phase ?? 'starting';
   const headline =
     title ??
     (active === 'starting'
-      ? 'Starting Core ERP'
+      ? `Starting ${appName}`
       : active === 'session'
         ? 'Signed in'
         : active === 'sync'
@@ -45,7 +47,7 @@ export default function AuthBootScreen({ phase = 'starting', title }: Props) {
       </div>
 
       <div className="auth-boot-copy">
-        <p className="auth-boot-brand">Core ERP</p>
+        <p className="auth-boot-brand">{appName}</p>
         <p className="auth-boot-headline">{headline}</p>
         <p className="auth-boot-sub">This can take a moment if the server is waking up.</p>
 

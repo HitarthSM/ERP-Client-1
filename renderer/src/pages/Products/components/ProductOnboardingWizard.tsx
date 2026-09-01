@@ -242,12 +242,15 @@ function Step1Panel({
 function Step2Panel({
   name, setName, sku, barcode, setBarcode,
   unit, setUnit, description, setDescription,
+  manufacturer, setManufacturer, packSize, setPackSize,
 }: {
   name: string; setName: (v: string) => void;
   sku: string;
   barcode: string; setBarcode: (v: string) => void;
   unit: ProductUnit | ''; setUnit: (v: ProductUnit | '') => void;
   description: string; setDescription: (v: string) => void;
+  manufacturer: string; setManufacturer: (v: string) => void;
+  packSize: string; setPackSize: (v: string) => void;
 }) {
   return (
     <SectionCard title="Product Details" icon={<CheckCircle2 size={15} className="text-primary" />}
@@ -297,10 +300,32 @@ function Step2Panel({
           </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <FieldLabel>Manufacturer / Brand</FieldLabel>
+            <Input
+              value={manufacturer}
+              onChange={(e) => setManufacturer(e.target.value)}
+              placeholder="e.g. Amul, Nestle, 3M"
+            />
+          </div>
+          <div>
+            <FieldLabel>Pack Size (units per pack)</FieldLabel>
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              value={packSize}
+              onChange={(e) => setPackSize(e.target.value)}
+              placeholder="Leave blank if sold individually"
+            />
+          </div>
+        </div>
+
         <div>
           <FieldLabel>Description</FieldLabel>
           <Textarea
-            rows={5}
+            rows={4}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Provide a detailed description including features, benefits, and specifications…"
@@ -575,6 +600,8 @@ export function ProductOnboardingWizard({ editingProduct, onClose, onSuccess }: 
   const [barcode, setBarcode]   = useState(editingProduct?.barcode ?? '');
   const [unit, setUnit]         = useState<ProductUnit | ''>(editingProduct?.unit ?? '');
   const [description, setDescription] = useState(editingProduct?.description ?? '');
+  const [manufacturer, setManufacturer] = useState(editingProduct?.manufacturer ?? '');
+  const [packSize, setPackSize] = useState(editingProduct?.packSize != null ? String(editingProduct.packSize) : '');
   // Step 3
   const [costPrice, setCostPrice]         = useState(editingProduct?.costPrice != null ? String(editingProduct.costPrice) : '');
   const [retailPrice, setRetailPrice]     = useState(editingProduct?.retailPrice != null ? String(editingProduct.retailPrice) : '');
@@ -657,6 +684,8 @@ export function ProductOnboardingWizard({ editingProduct, onClose, onSuccess }: 
           barcode: barcode || undefined,
           unit: unit || undefined,
           description: description || undefined,
+          manufacturer: manufacturer || undefined,
+          packSize: packSize ? Number(packSize) : undefined,
         });
         pid = created.id;
         setProductId(pid);
@@ -670,6 +699,8 @@ export function ProductOnboardingWizard({ editingProduct, onClose, onSuccess }: 
             barcode: barcode || undefined,
             unit: unit || undefined,
             description: description || undefined,
+            manufacturer: manufacturer || undefined,
+            packSize: packSize ? Number(packSize) : undefined,
           },
         });
       }
@@ -772,6 +803,8 @@ export function ProductOnboardingWizard({ editingProduct, onClose, onSuccess }: 
               barcode={barcode} setBarcode={setBarcode}
               unit={unit} setUnit={setUnit}
               description={description} setDescription={setDescription}
+              manufacturer={manufacturer} setManufacturer={setManufacturer}
+              packSize={packSize} setPackSize={setPackSize}
             />
           )}
           {step === 2 && (

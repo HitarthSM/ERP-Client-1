@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import { formatEntityLabel } from '../../lib/entityLabel';
+import { getBlob } from '../../lib/http';
 import type { Bill } from '../../types';
 import type { PosReceipt } from './checkout';
 import { buildSaleDocHtml, defaultPdfFileName, type SaleDocKind } from './buildSaleDocHtml';
@@ -10,6 +11,11 @@ export function billToPosReceipt(
     locationName?: string;
     partyLabel?: string;
     productLabel?: (productId: string) => string;
+    orgName?: string;
+    logoUrl?: string;
+    orgMeta?: string;
+    orgPhone?: string;
+    orgAddress?: string;
   } = {},
 ): PosReceipt {
   const items = bill.items ?? [];
@@ -18,6 +24,11 @@ export function billToPosReceipt(
     mode: 'sales',
     storeName: opts.locationName,
     partyLabel: opts.partyLabel,
+    orgName: opts.orgName,
+    logoUrl: opts.logoUrl,
+    orgMeta: opts.orgMeta,
+    orgPhone: opts.orgPhone,
+    orgAddress: opts.orgAddress,
     paymentMethod: bill.paymentMethod ?? undefined,
     saleType: bill.saleType ?? undefined,
     paymentTiming: bill.paymentTiming ?? undefined,
@@ -49,6 +60,34 @@ export function printSaleDoc(receipt: PosReceipt, kind: SaleDocKind = 'receipt')
   w.document.close();
   w.focus();
   w.print();
+}
+
+export async function downloadBillPdf(billId: string): Promise<void> {
+  try {
+    const { blob, filename } = await getBlob(`/api/v1/bills/${billId}/pdf`);
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    toast.error('Could not download bill PDF');
+  }
+}
+
+export async function downloadPurchaseOrderPdf(purchaseOrderId: string): Promise<void> {
+  try {
+    const { blob, filename } = await getBlob(`/api/v1/purchase-orders/${purchaseOrderId}/pdf`);
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    toast.error('Could not download purchase order PDF');
+  }
 }
 
 export async function downloadSaleDoc(

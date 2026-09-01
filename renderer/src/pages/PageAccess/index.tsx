@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, RotateCcw } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { PageAccess } from '../../api';
+import { useSession } from '../../context/SessionContext';
 import type { PageAccessConfig } from '../../types';
 import { ALL_ITEMS } from '../../config/modules';
 import { isFullPageAccessRole } from '../../lib/page-access';
@@ -9,6 +10,7 @@ import { isFullPageAccessRole } from '../../lib/page-access';
 const ROLES = [
   { key: 'super_admin',    label: 'Super Admin' },
   { key: 'org_admin',     label: 'Org Admin' },
+  { key: 'org_manager',   label: 'Org Manager' },
   { key: 'store_manager', label: 'Store Manager' },
   { key: 'store_staff',   label: 'Store Staff' },
 ];
@@ -22,6 +24,7 @@ function buildMap(configs: PageAccessConfig[]): Map<string, Set<string>> {
 }
 
 export default function PageAccessPage() {
+  const { isSuperAdmin } = useSession();
   const { data: configs = [], isLoading } = PageAccess.useList();
   const { mutate: save, isPending } = PageAccess.useUpdate();
 
@@ -34,6 +37,7 @@ export default function PageAccessPage() {
   }, [configs]);
 
   const toggle = (pageKey: string, role: string) => {
+    if (!isSuperAdmin) return;
     setAccessMap((prev) => {
       const next = new Map(prev);
       const roles = new Set(next.get(pageKey) ?? []);
@@ -46,6 +50,7 @@ export default function PageAccessPage() {
   const handleReset = () => setAccessMap(buildMap(configs));
 
   const handleSave = () => {
+    if (!isSuperAdmin) return;
     const payload: PageAccessConfig[] = ALL_ITEMS.map((item) => ({
       pageKey: item.key,
       allowedRoles: Array.from(accessMap.get(item.key) ?? []),
@@ -67,17 +72,21 @@ export default function PageAccessPage() {
         <div>
           <h1 className="text-2xl font-bold">Page Access</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Configure which roles can access each page. Super Admin and Org Admin always have full access.
+            {isSuperAdmin
+              ? 'Configure which roles can access each page. Super Admin and Org Admin always have full access.'
+              : 'View which roles can access each page. Only Super Admin can change these settings.'}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleReset} disabled={isPending}>
-            <RotateCcw size={14} className="mr-1.5" /> Reset
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={isPending}>
-            <Save size={14} className="mr-1.5" /> {isPending ? 'Saving…' : 'Save changes'}
-          </Button>
-        </div>
+        {isSuperAdmin && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleReset} disabled={isPending}>
+              <RotateCcw size={14} className="mr-1.5" /> Reset
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={isPending}>
+              <Save size={14} className="mr-1.5" /> {isPending ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="border rounded-lg overflow-auto">
@@ -105,8 +114,9 @@ export default function PageAccessPage() {
                       ) : (
                         <input
                           type="checkbox"
-                          className="w-4 h-4 cursor-pointer accent-primary"
+                          className="w-4 h-4 accent-primary"
                           checked={allowed.has(r.key)}
+                          disabled={!isSuperAdmin}
                           onChange={() => toggle(item.key, r.key)}
                         />
                       )}

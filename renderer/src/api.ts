@@ -1,21 +1,20 @@
-export { configureApi, get, post, put, patch, del } from './lib/http';
-import { get, post, put, patch, del, uploadForm } from './lib/http';
+export { configureApi, get, post, put, patch, del, getBlob } from './lib/http';
+import { get, post, put, patch, del, uploadForm, getBlob } from './lib/http';
 import { createResource, createCreateOnlyResource } from './lib/resource';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type {
   Organization, Category, Product, Supplier, PurchaseOrder, Bill, PaymentTransaction,
-  Notification, ItemReturn, ReportGenerationLog, Order, Invoice, Customer, Expense, PurchaseItem,
+  Notification, ItemReturn, ReportGenerationLog, GenerateReportInput, Order, Invoice, Customer, CustomerCreditTransaction, CreditTransactionDocument, Expense, PurchaseItem,
   ActivityLog, Role, UserRole, PlatformConfiguration, PlatformUser, Location,
   ProductImage, ProductImageUploadUrl, ProductSupplier,
-  InventoryItem, StockMovement, StockMovementOp, StockOperationBody, StockTransfer,
+  InventoryItem, StockMovement, StockMovementOp, StockOperationBody, StockTransfer, StockTransferRequest,
   UnpublishedStock, UnpublishedStockMovement, ProductLog, PaginatedResponse,
   BillStatus, PaymentMethod, CreateBillItemInput, UpdateBillInput,
-  SaleType, CustomerType, PaymentTiming,
   CreditApprovalRequest, CommissionPayable,
   QuickCharge, CustomerTypeRule,
   Country, State, City,
-  CreatePurchaseOrderInput, ReceivePurchaseOrderInput,
+  CreatePurchaseOrderInput, ReceivePurchaseOrderInput, AllocatePurchaseOrderInput,
   ClerkUserListResponse, ClerkUserRolesResponse, ClerkInvitation, EInvitationStatus,
   InviteUserPayload, UpdateRolesPayload, AssignOrgPayload, ClerkOrganization,
   PageAccessConfig,
@@ -24,6 +23,10 @@ import type {
   SalesSummaryData, RevenueTrendPoint, TopProduct, TopCustomer,
   PurchaseSummaryData, PurchaseTrendPoint, TopSupplier,
   InventorySummaryData, StockByLocationPoint,
+  PaymentMixPoint, CategoryValuePoint, PurchaseExceptionsData,
+  DemandTierPoint, ProductMovementRank, ProductMarginRank,
+  SupplierPricePoint, InventoryStatusData, InventoryStatusTrendPoint, StockDamageSummaryData,
+  DashboardAnalyticsParams,
 } from './types';
 
 // ── New hook-based resources ───────────────────────────────────────────────────
@@ -61,11 +64,25 @@ export const PurchaseOrders = {
       mutationFn: ({ id, body }: { id: string; body: ReceivePurchaseOrderInput }) =>
         post<PurchaseOrder>(`/api/v1/purchase-orders/${id}/receive`, body),
       onSuccess: () => {
-        toast.success('Purchase order received');
+        toast.success('Items marked as received');
         queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+        queryClient.invalidateQueries({ queryKey: ['purchase-items'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to record receipt'),
+    });
+  },
+  useAllocate() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: ({ id, body }: { id: string; body: AllocatePurchaseOrderInput }) =>
+        post<PurchaseOrder>(`/api/v1/purchase-orders/${id}/allocate`, body),
+      onSuccess: () => {
+        toast.success('Stock allocated to locations');
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+        queryClient.invalidateQueries({ queryKey: ['purchase-items'] });
         queryClient.invalidateQueries({ queryKey: ['inventory'] });
       },
-      onError: (error: Error) => toast.error(error.message || 'Failed to receive purchase order'),
+      onError: (error: Error) => toast.error(error.message || 'Failed to allocate stock'),
     });
   },
 };
@@ -197,7 +214,40 @@ export const Notifications = {
   },
 };
 export const ItemReturns = createResource<ItemReturn>('/api/v1/item-returns', 'item-returns', 'Return');
-export const ReportGenerationLogs = createResource<ReportGenerationLog>('/api/v1/report-generation-logs', 'report-generation-logs', 'Report log');
+const _reportLogsBase = createResource<ReportGenerationLog>('/api/v1/report-generation-logs', 'report-generation-logs', 'Report log');
+
+export const ReportGenerationLogs = {
+  ..._reportLogsBase,
+
+  useGenerate() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (body: GenerateReportInput) =>
+        post<ReportGenerationLog>('/api/v1/report-generation-logs/generate', body),
+      onSuccess: () => {
+        toast.success('Report generated successfully');
+        queryClient.invalidateQueries({ queryKey: ['report-generation-logs'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to generate report'),
+    });
+  },
+
+  useDownloadPdf() {
+    return useMutation({
+      mutationFn: async (id: string) => {
+        const { blob, filename } = await getBlob(`/api/v1/report-generation-logs/${id}/pdf`);
+        const url  = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href     = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      },
+      onSuccess: () => toast.success('PDF downloaded'),
+      onError: (error: Error) => toast.error(error.message || 'Failed to download PDF'),
+    });
+  },
+};
 export const Orders = createCreateOnlyResource<Order>('/api/v1/orders', 'orders', 'Order');
 export const Invoices = createCreateOnlyResource<Invoice>('/api/v1/invoices', 'invoices', 'Invoice');
 
@@ -236,6 +286,68 @@ export const Customers = {
         queryClient.invalidateQueries({ queryKey: ['customers'] });
       },
       onError: (error: Error) => toast.error(error.message || 'Failed to update customer'),
+    });
+  },
+  useGetBills(customerId: string | undefined, page = 1, perPage = 10, enabled = true) {
+    return useQuery({
+      queryKey: ['customers', customerId, 'bills', page, perPage],
+      queryFn: () =>
+        get<PaginatedResponse<Bill>>(`/api/v1/customers/${customerId as string}/bills`, {
+          $page: page,
+          $perPage: perPage,
+        }),
+      enabled: !!customerId && enabled,
+    });
+  },
+  useGetCreditTransactions(customerId: string | undefined, page = 1, perPage = 20, enabled = true) {
+    return useQuery({
+      queryKey: ['customers', customerId, 'credit-transactions', page, perPage],
+      queryFn: () =>
+        get<PaginatedResponse<CustomerCreditTransaction>>(
+          `/api/v1/customers/${customerId as string}/credit-transactions`,
+          { $page: page, $perPage: perPage },
+        ),
+      enabled: !!customerId && enabled,
+    });
+  },
+  useRecordCreditTransaction(customerId: string | undefined) {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (body: {
+        type: 'payment' | 'adjustment';
+        amount: number;
+        paymentMethod?: string;
+        note?: string;
+      }) => post<Customer>(`/api/v1/customers/${customerId as string}/credit-transactions`, body),
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['customers', customerId] });
+        queryClient.invalidateQueries({ queryKey: ['customers', customerId, 'credit-transactions'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to record transaction'),
+    });
+  },
+};
+
+export const CreditTransactions = {
+  useSearch(params?: {
+    page?: number;
+    perPage?: number;
+    type?: 'credit_sale' | 'payment' | 'adjustment';
+    search?: string;
+    customerId?: string;
+    enabled?: boolean;
+  }) {
+    return useQuery({
+      queryKey: ['credit-transactions', params?.page ?? 1, params?.perPage ?? 20, params?.type ?? 'all', params?.search ?? '', params?.customerId ?? ''],
+      queryFn: () =>
+        get<PaginatedResponse<CreditTransactionDocument>>('/api/v1/credit-transactions', {
+          $page: params?.page ?? 1,
+          $perPage: params?.perPage ?? 20,
+          ...(params?.type ? { type: params.type } : {}),
+          ...(params?.search ? { search: params.search } : {}),
+          ...(params?.customerId ? { customerId: params.customerId } : {}),
+        }),
+      enabled: params?.enabled ?? true,
     });
   },
 };
@@ -410,6 +522,19 @@ export function useListRoles() {
 
 export const UserRoles = createCreateOnlyResource<UserRole>('/api/v1/user-roles', 'user-roles', 'User role');
 
+export function useUpdateUserRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<UserRole> }) =>
+      put<UserRole>(`/api/v1/user-roles/${id}`, body),
+    onSuccess: () => {
+      toast.success('User role updated');
+      queryClient.invalidateQueries({ queryKey: ['user-roles'] });
+    },
+    onError: (error: Error) => toast.error(error.message || 'Failed to update user role'),
+  });
+}
+
 export function useListUserRoles() {
   return useQuery<UserRole[]>({
     queryKey: ['user-roles', 'list'],
@@ -472,6 +597,73 @@ export const StockTransfers = {
         queryClient.invalidateQueries({ queryKey: ['stock-transfers'] });
       },
       onError: (error: Error) => toast.error(error.message || 'Failed to create stock transfer'),
+    });
+  },
+};
+
+export const StockTransferRequests = {
+  useListMine(locationId: string | undefined) {
+    return useQuery({
+      queryKey: ['stock-transfer-requests', 'mine', locationId],
+      queryFn: () => get<StockTransferRequest[]>('/api/v1/stock-transfer-requests/mine', { locationId }),
+      enabled: !!locationId,
+    });
+  },
+  useListOpen(locationId: string | undefined) {
+    return useQuery({
+      queryKey: ['stock-transfer-requests', 'open', locationId],
+      queryFn: () => get<StockTransferRequest[]>('/api/v1/stock-transfer-requests/open', { locationId }),
+      enabled: !!locationId,
+    });
+  },
+  useRaise() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (body: { requestingLocationId: string; productId: string; variantId?: string; quantityRequested: number }) =>
+        post<StockTransferRequest>('/api/v1/stock-transfer-requests', body),
+      onSuccess: () => {
+        toast.success('Stock request raised');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to raise request'),
+    });
+  },
+  useAccept() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: ({ id, acceptingLocationId }: { id: string; acceptingLocationId: string }) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/accept`, { acceptingLocationId }),
+      onSuccess: () => {
+        toast.success('Request accepted — stock deducted from your store');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to accept request'),
+    });
+  },
+  useClaim() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (id: string) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/claim`, {}),
+      onSuccess: () => {
+        toast.success('Marked as received — stock added to your inventory');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to claim request'),
+    });
+  },
+  useCancel() {
+    const queryClient = useQueryClient();
+    return useMutation({
+      mutationFn: (id: string) =>
+        put<StockTransferRequest>(`/api/v1/stock-transfer-requests/${id}/cancel`, {}),
+      onSuccess: () => {
+        toast.success('Request cancelled');
+        queryClient.invalidateQueries({ queryKey: ['stock-transfer-requests'] });
+      },
+      onError: (error: Error) => toast.error(error.message || 'Failed to cancel request'),
     });
   },
 };
@@ -844,7 +1036,7 @@ export const ClerkUsers = {
     });
   },
 
-  /** POST /api/v1/users/clerk/invite */
+  /** POST /api/v1/users/clerk/invite — body: { email, roleId, locationId?, redirectUrl? } */
   useInvite() {
     const queryClient = useQueryClient();
     return useMutation({
@@ -872,7 +1064,7 @@ export const ClerkUsers = {
   useRevokeInvitation() {
     const queryClient = useQueryClient();
     return useMutation({
-      mutationFn: (invitationId: string) => del<void>(`/api/v1/users/clerk/invitations/${invitationId}`),
+      mutationFn: (invitationId: string) => del(`/api/v1/users/clerk/invitations/${invitationId}`),
       onSuccess: () => {
         toast.success('Invitation revoked');
         queryClient.invalidateQueries({ queryKey: [CLERK_INVITATIONS_KEY] });
@@ -1016,25 +1208,44 @@ export const MaintenanceTypes = {
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
+function analyticsQueryParams(params?: DashboardAnalyticsParams & { limit?: number; months?: number; staleDays?: number }) {
+  const q: Record<string, string | number> = {};
+  if (params?.period) q.period = params.period;
+  if (params?.from) q.from = params.from;
+  if (params?.to) q.to = params.to;
+  if (params?.locationId) q.locationId = params.locationId;
+  if (params?.limit != null) q.limit = params.limit;
+  if (params?.months != null) q.months = params.months;
+  if (params?.staleDays != null) q.staleDays = params.staleDays;
+  return q;
+}
+
 export const Analytics = {
-  useSalesSummary() {
+  useSalesSummary(params?: DashboardAnalyticsParams) {
     return useQuery<SalesSummaryData>({
-      queryKey: ['analytics', 'sales-summary'],
-      queryFn:  () => get<SalesSummaryData>('/api/v1/analytics/sales-summary'),
+      queryKey: ['analytics', 'sales-summary', params],
+      queryFn:  () => get<SalesSummaryData>('/api/v1/analytics/sales-summary', analyticsQueryParams(params)),
       staleTime: 5 * 60 * 1000,
     });
   },
-  useRevenueTrend(months = 6) {
+  useSalesByCategory(params?: DashboardAnalyticsParams) {
+    return useQuery<CategoryValuePoint[]>({
+      queryKey: ['analytics', 'sales-by-category', params],
+      queryFn:  () => get<CategoryValuePoint[]>('/api/v1/analytics/sales-by-category', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useRevenueTrend(params?: DashboardAnalyticsParams & { months?: number }) {
     return useQuery<RevenueTrendPoint[]>({
-      queryKey: ['analytics', 'revenue-trend', months],
-      queryFn:  () => get<RevenueTrendPoint[]>('/api/v1/analytics/revenue-trend', { months }),
+      queryKey: ['analytics', 'revenue-trend', params],
+      queryFn:  () => get<RevenueTrendPoint[]>('/api/v1/analytics/revenue-trend', analyticsQueryParams(params)),
       staleTime: 5 * 60 * 1000,
     });
   },
-  useTopProducts(limit = 10) {
+  useTopProducts(params?: DashboardAnalyticsParams & { limit?: number }) {
     return useQuery<TopProduct[]>({
-      queryKey: ['analytics', 'top-products', limit],
-      queryFn:  () => get<TopProduct[]>('/api/v1/analytics/top-products', { limit }),
+      queryKey: ['analytics', 'top-products', params],
+      queryFn:  () => get<TopProduct[]>('/api/v1/analytics/top-products', analyticsQueryParams({ limit: 10, ...params })),
       staleTime: 5 * 60 * 1000,
     });
   },
@@ -1045,17 +1256,38 @@ export const Analytics = {
       staleTime: 5 * 60 * 1000,
     });
   },
-  usePurchaseSummary() {
-    return useQuery<PurchaseSummaryData>({
-      queryKey: ['analytics', 'purchase-summary'],
-      queryFn:  () => get<PurchaseSummaryData>('/api/v1/analytics/purchase-summary'),
+  usePaymentMix(params?: DashboardAnalyticsParams) {
+    return useQuery<PaymentMixPoint[]>({
+      queryKey: ['analytics', 'payment-mix', params],
+      queryFn:  () => get<PaymentMixPoint[]>('/api/v1/analytics/payment-mix', analyticsQueryParams(params)),
       staleTime: 5 * 60 * 1000,
     });
   },
-  usePurchaseTrend(months = 6) {
+  usePurchaseSummary(params?: DashboardAnalyticsParams) {
+    return useQuery<PurchaseSummaryData>({
+      queryKey: ['analytics', 'purchase-summary', params],
+      queryFn:  () => get<PurchaseSummaryData>('/api/v1/analytics/purchase-summary', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  usePurchaseTrend(params?: DashboardAnalyticsParams & { months?: number }) {
     return useQuery<PurchaseTrendPoint[]>({
-      queryKey: ['analytics', 'purchase-trend', months],
-      queryFn:  () => get<PurchaseTrendPoint[]>('/api/v1/analytics/purchase-trend', { months }),
+      queryKey: ['analytics', 'purchase-trend', params],
+      queryFn:  () => get<PurchaseTrendPoint[]>('/api/v1/analytics/purchase-trend', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  usePurchaseByCategory(params?: DashboardAnalyticsParams) {
+    return useQuery<CategoryValuePoint[]>({
+      queryKey: ['analytics', 'purchase-by-category', params],
+      queryFn:  () => get<CategoryValuePoint[]>('/api/v1/analytics/purchase-by-category', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  usePurchaseExceptions(params?: Pick<DashboardAnalyticsParams, 'locationId'>) {
+    return useQuery<PurchaseExceptionsData>({
+      queryKey: ['analytics', 'purchase-exceptions', params],
+      queryFn:  () => get<PurchaseExceptionsData>('/api/v1/analytics/purchase-exceptions', analyticsQueryParams(params)),
       staleTime: 5 * 60 * 1000,
     });
   },
@@ -1066,17 +1298,87 @@ export const Analytics = {
       staleTime: 5 * 60 * 1000,
     });
   },
-  useInventorySummary() {
+  useInventorySummary(params?: Pick<DashboardAnalyticsParams, 'locationId'>) {
     return useQuery<InventorySummaryData>({
-      queryKey: ['analytics', 'inventory-summary'],
-      queryFn:  () => get<InventorySummaryData>('/api/v1/analytics/inventory-summary'),
+      queryKey: ['analytics', 'inventory-summary', params],
+      queryFn:  () => get<InventorySummaryData>('/api/v1/analytics/inventory-summary', analyticsQueryParams(params)),
       staleTime: 5 * 60 * 1000,
     });
   },
-  useStockByLocation() {
+  useStockByLocation(params?: Pick<DashboardAnalyticsParams, 'locationId'>) {
     return useQuery<StockByLocationPoint[]>({
-      queryKey: ['analytics', 'stock-by-location'],
-      queryFn:  () => get<StockByLocationPoint[]>('/api/v1/analytics/stock-by-location'),
+      queryKey: ['analytics', 'stock-by-location', params],
+      queryFn:  () => get<StockByLocationPoint[]>('/api/v1/analytics/stock-by-location', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useStockValueByCategory(params?: Pick<DashboardAnalyticsParams, 'locationId'>) {
+    return useQuery<CategoryValuePoint[]>({
+      queryKey: ['analytics', 'stock-value-by-category', params],
+      queryFn:  () => get<CategoryValuePoint[]>('/api/v1/analytics/stock-value-by-category', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useProductDemandTiers(params?: DashboardAnalyticsParams) {
+    return useQuery<DemandTierPoint[]>({
+      queryKey: ['analytics', 'product-demand-tiers', params],
+      queryFn:  () => get<DemandTierPoint[]>('/api/v1/analytics/product-demand-tiers', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useTopMarginProducts(params?: DashboardAnalyticsParams & { limit?: number }) {
+    return useQuery<ProductMarginRank[]>({
+      queryKey: ['analytics', 'top-margin-products', params],
+      queryFn:  () => get<ProductMarginRank[]>('/api/v1/analytics/top-margin-products', analyticsQueryParams({ limit: 10, ...params })),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useCostlyProducts(params?: DashboardAnalyticsParams & { limit?: number }) {
+    return useQuery<ProductMarginRank[]>({
+      queryKey: ['analytics', 'costly-products', params],
+      queryFn:  () => get<ProductMarginRank[]>('/api/v1/analytics/costly-products', analyticsQueryParams({ limit: 10, ...params })),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useFastMovingProducts(params?: DashboardAnalyticsParams & { limit?: number }) {
+    return useQuery<ProductMovementRank[]>({
+      queryKey: ['analytics', 'fast-moving-products', params],
+      queryFn:  () => get<ProductMovementRank[]>('/api/v1/analytics/fast-moving-products', analyticsQueryParams({ limit: 10, ...params })),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useDeadStock(params?: Pick<DashboardAnalyticsParams, 'locationId'> & { limit?: number; staleDays?: number }) {
+    return useQuery<ProductMovementRank[]>({
+      queryKey: ['analytics', 'dead-stock', params],
+      queryFn:  () => get<ProductMovementRank[]>('/api/v1/analytics/dead-stock', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useSupplierPriceComparison(params?: DashboardAnalyticsParams & { limit?: number }) {
+    return useQuery<SupplierPricePoint[]>({
+      queryKey: ['analytics', 'supplier-price-comparison', params],
+      queryFn:  () => get<SupplierPricePoint[]>('/api/v1/analytics/supplier-price-comparison', analyticsQueryParams({ limit: 30, ...params })),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useInventoryStatus(params?: Pick<DashboardAnalyticsParams, 'locationId'> & { staleDays?: number }) {
+    return useQuery<InventoryStatusData>({
+      queryKey: ['analytics', 'inventory-status', params],
+      queryFn:  () => get<InventoryStatusData>('/api/v1/analytics/inventory-status', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useInventoryStatusTrend(params?: DashboardAnalyticsParams & { staleDays?: number }) {
+    return useQuery<InventoryStatusTrendPoint[]>({
+      queryKey: ['analytics', 'inventory-status-trend', params],
+      queryFn:  () => get<InventoryStatusTrendPoint[]>('/api/v1/analytics/inventory-status-trend', analyticsQueryParams(params)),
+      staleTime: 5 * 60 * 1000,
+    });
+  },
+  useStockDamageSummary(params?: DashboardAnalyticsParams & { limit?: number }) {
+    return useQuery<StockDamageSummaryData>({
+      queryKey: ['analytics', 'stock-damage-summary', params],
+      queryFn:  () => get<StockDamageSummaryData>('/api/v1/analytics/stock-damage-summary', analyticsQueryParams({ limit: 10, ...params })),
       staleTime: 5 * 60 * 1000,
     });
   },

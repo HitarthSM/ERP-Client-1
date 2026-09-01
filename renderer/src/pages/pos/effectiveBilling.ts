@@ -20,6 +20,18 @@ export function effectiveSkipOverLimitApproval(
   return Boolean(rule?.skipOverLimitApproval);
 }
 
+/** Same rule as core-apis BillCompletionService.enforceCreditLimit. Equal to limit is allowed. */
+export function creditSaleRequiresApproval(
+  creditLimit: number,
+  creditBalance: number,
+  saleTotal: number,
+  skipOverLimitApproval: boolean,
+): boolean {
+  if (skipOverLimitApproval) return false;
+  if (!(creditLimit > 0)) return false;
+  return creditBalance + saleTotal > creditLimit;
+}
+
 export function discountedRate(listRate: number, discountPercent: number): number {
   return Number((listRate * (1 - discountPercent / 100)).toFixed(4));
 }

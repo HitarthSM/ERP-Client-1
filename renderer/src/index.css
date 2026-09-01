@@ -352,6 +352,13 @@
     background: white;
   }
 
+  .pos-receipt-sheet {
+    max-width: 800px;
+    margin: 0 auto;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
   .pos-no-print {
     display: none !important;
   }

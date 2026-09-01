@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clerk } from '../../lib/clerk';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +14,7 @@ export default function VerifySecondFactor() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
+  const preparedCode = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -24,6 +25,18 @@ export default function VerifySecondFactor() {
         navigate('/login', { replace: true });
         return;
       }
+      const KEY = 'erp.verify-second-factor.prepared';
+      const hasStorage = typeof window !== 'undefined' && window.sessionStorage;
+      const skipPrepareOnce = hasStorage ? window.sessionStorage.getItem(KEY) === '1' : false;
+      if (hasStorage) window.sessionStorage.removeItem(KEY);
+
+      // If we just arrived right after resolveSignInStatus, the code has
+      // already been prepared. Only prepare again when the user refreshes
+      // or deep-links into this page.
+      if (!skipPrepareOnce && !preparedCode.current) {
+        await prepareEmailSecondFactor(signIn).catch(() => undefined);
+      }
+      preparedCode.current = true;
       setReady(true);
     })();
   }, [navigate]);
@@ -53,6 +66,7 @@ export default function VerifySecondFactor() {
     if (!signIn) return;
     try {
       await prepareEmailSecondFactor(signIn);
+      preparedCode.current = true;
       toast.success('Verification code resent');
     } catch (error: any) {
       toast.error(clerkErrorMessage(error, 'Failed to resend code'));

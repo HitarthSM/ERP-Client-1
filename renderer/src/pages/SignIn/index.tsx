@@ -9,6 +9,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import AuthBootScreen from '../../components/auth/AuthBootScreen';
 import LoginVisualPanel from '../../components/auth/LoginVisualPanel';
+import { getAppName } from '../../lib/branding';
 import { toast } from 'sonner';
 
 export default function SignIn() {
@@ -18,6 +19,12 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Backend /me still catching up after setActive — avoid flashing the login form.
+  // Require an active Clerk session so a stale syncing flag after logout cannot flash this UI.
+  if (syncing && clerk.session) {
+    return <AuthBootScreen phase={bootPhase ?? 'session'} />;
+  }
+
   if (user) {
     return <Navigate to="/" replace />;
   }
@@ -25,12 +32,6 @@ export default function SignIn() {
   // After OAuth, Clerk may leave an incomplete sign-up on this client.
   if (clerk.client?.signUp?.status === 'missing_requirements') {
     return <Navigate to="/sso-continue" replace />;
-  }
-
-  // Backend /me still catching up after setActive — avoid flashing the login form.
-  // Require an active Clerk session so a stale syncing flag after logout cannot flash this UI.
-  if (syncing && clerk.session) {
-    return <AuthBootScreen phase={bootPhase ?? 'session'} />;
   }
 
   const requireClerkClient = () => {
@@ -77,7 +78,7 @@ export default function SignIn() {
       <div className="flex-1 flex items-center justify-center px-6 py-10 overflow-y-auto">
         <div className="w-full max-w-md">
           <div className="mb-8">
-            <h1 className="text-2xl font-semibold tracking-tight mb-1 lg:hidden">Core ERP Client</h1>
+            <h1 className="text-2xl font-semibold tracking-tight mb-1 lg:hidden">{getAppName()}</h1>
             <p className="text-muted-foreground">Sign in to your account</p>
           </div>
 

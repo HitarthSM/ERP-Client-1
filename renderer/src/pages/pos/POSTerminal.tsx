@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Check, Printer } from "lucide-react";
 import { toast } from "sonner";
-import { BillingSettings, Customers, CreditApprovals, ClerkUsers, Inventory, Locations, Products, Suppliers } from "../../api";
+import { CustomerDetailDrawer } from "../../components/CustomerDetailDrawer";
+import { BillingSettings, Customers, CreditApprovals, ClerkUsers, FleetDrivers, Inventory, Locations, Products, Suppliers } from "../../api";
 import { get } from "../../lib/http";
 import { useAuth } from "../../context/AuthContext";
 import type {
@@ -30,9 +32,9 @@ import { ReceiptDocument } from "./ReceiptDocument";
 import { DebtorNoteDocument } from "./DebtorNoteDocument";
 import { StatementDocument } from "./StatementDocument";
 import { DeliveryNoteDocument } from "./DeliveryNoteDocument";
-import { downloadSaleDoc } from "./billReceipt";
+import { downloadSaleDoc, downloadBillPdf, downloadPurchaseOrderPdf } from "./billReceipt";
 import { HeldSalesPanel } from "./HeldSalesPanel";
-import { productRate, type BillLine, type ExtraCharge, type Mode, type PrintDoc } from "./posHelpers";
+import { productRate, customerTypeToTier, productTierPrices, type BillLine, type ExtraCharge, type Mode, type PriceTier, type PrintDoc } from "./posHelpers";
 import {
   buildLocationStockMap,
   cartQtyForProduct,
@@ -45,8 +47,18 @@ import { ProductSearchPanel } from "./components/ProductSearchPanel";
 import { CartTable } from "./components/CartTable";
 import { CheckoutPanel } from "./components/CheckoutPanel";
 import { StepList } from "./components/StepList";
+import { SalesOrderHeader } from "./components/sales-order/SalesOrderHeader";
+import { CustomerInfoSection } from "./components/sales-order/CustomerInfoSection";
+import { ProductDetailsSection } from "./components/sales-order/ProductDetailsSection";
+import { PaymentLogisticsSection } from "./components/sales-order/PaymentLogisticsSection";
+import { OrderSummarySidebar } from "./components/sales-order/OrderSummarySidebar";
+import { PurchaseOrderHeader } from "./components/purchase-order/PurchaseOrderHeader";
+import { PurchaseDocumentDetails } from "./components/purchase-order/PurchaseDocumentDetails";
+import { PurchaseSupplierInfo } from "./components/purchase-order/PurchaseSupplierInfo";
+import { PurchaseLineItems } from "./components/purchase-order/PurchaseLineItems";
+import { PurchaseStockPayment } from "./components/purchase-order/PurchaseStockPayment";
 import type { QuickChargeTile } from "./components/ProductSearchPanel";
-import { discountedRate, effectiveDiscountPercent, effectiveSkipOverLimitApproval } from "./effectiveBilling";
+import { creditSaleRequiresApproval, discountedRate, effectiveDiscountPercent, effectiveSkipOverLimitApproval } from "./effectiveBilling";
 
 let lineIdSeq = 100;
 
@@ -61,6 +73,9 @@ function BillSuccessModal({
   onPrintDoc,
   onClose,
   pendingCreditApproval,
+  creditBalanceAfter,
+  creditLimit,
+  billId,
 }: {
   receipt: PosReceipt;
   steps: CheckoutStep[];
@@ -68,6 +83,9 @@ function BillSuccessModal({
   onPrintDoc: (doc: PrintDoc) => void;
   onClose: () => void;
   pendingCreditApproval?: boolean;
+  creditBalanceAfter?: number;
+  creditLimit?: number;
+  billId?: string;
 }) {
   const hasGaps = steps.some(
     (s) => s.status === "failed" || s.status === "skipped",
@@ -100,7 +118,7 @@ function BillSuccessModal({
       <div
         role="dialog"
         aria-labelledby="pos-success-title"
-        className="relative flex w-full max-w-md max-h-[90vh] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        className="relative flex max-h-[90vh] w-full max-w-[880px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
       >
         <div className="flex-shrink-0 border-b border-border px-5 pt-5 pb-4">
           <div className="flex items-start gap-3">
@@ -170,6 +188,25 @@ function BillSuccessModal({
             </p>
           ) : (
             <>
+              {receipt.saleType === "credit" && creditBalanceAfter != null && creditLimit != null && (
+                <div className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs space-y-1">
+                  <p className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">Updated Credit Balance</p>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Balance (owed)</span>
+                    <span className="font-semibold tabular-nums">{creditBalanceAfter.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Limit</span>
+                    <span className="tabular-nums">{creditLimit.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Remaining</span>
+                    <span className={`font-semibold tabular-nums ${(creditLimit - creditBalanceAfter) < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {(creditLimit - creditBalanceAfter).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
               {receipt.mode === "sales" && (
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {docButtons.map((b) => (
@@ -188,13 +225,8 @@ function BillSuccessModal({
                   ))}
                 </div>
               )}
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Preview
-              </p>
-              <div className="rounded-xl border border-border/80 bg-muted/40 p-3 sm:p-4">
-                <div className="overflow-hidden rounded-lg ring-1 ring-black/5">
-                  {preview}
-                </div>
+              <div className="overflow-hidden rounded-lg border border-border/70 bg-white">
+                {preview}
               </div>
             </>
           )}
@@ -220,10 +252,19 @@ function BillSuccessModal({
                 <Printer size={15} />
                 Print
               </button>
-              {receipt.mode === "sales" && (
+              {receipt.mode === "sales" && billId && (
                 <button
                   type="button"
-                  onClick={() => void downloadSaleDoc(receipt, printDoc)}
+                  onClick={() => void downloadBillPdf(billId)}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition hover:bg-muted"
+                >
+                  PDF
+                </button>
+              )}
+              {receipt.mode === "purchase" && billId && (
+                <button
+                  type="button"
+                  onClick={() => void downloadPurchaseOrderPdf(billId)}
                   className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition hover:bg-muted"
                 >
                   PDF
@@ -249,6 +290,7 @@ function BillSuccessModal({
 }
 
 export default function POSTerminal({ mode }: { mode: Mode }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [locationId, setLocationId] = useState("");
   const [lines, setLines] = useState<BillLine[]>([]);
   const [searchVal, setSearchVal] = useState("");
@@ -264,6 +306,7 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     receipt: PosReceipt;
     steps: CheckoutStep[];
     pendingCreditApproval?: boolean;
+    billId?: string;
   } | null>(null);
   const [lastReceipt, setLastReceipt] = useState<PosReceipt | null>(null);
   const [printDoc, setPrintDoc] = useState<PrintDoc>("receipt");
@@ -279,6 +322,10 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
   const [partialAmount, setPartialAmount] = useState("");
   const [holding, setHolding] = useState(false);
   const [showHeldSales, setShowHeldSales] = useState(false);
+  const [transactionDate, setTransactionDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [supplierMode, setSupplierMode] = useState<"old" | "new">("old");
+  const [stockNotes, setStockNotes] = useState("");
   /** Bill id being edited via Resume — checkout completes THIS bill instead of creating a new one. */
   const [activeDraftBillId, setActiveDraftBillId] = useState<string | null>(null);
   const [dismissedRejectionIds, setDismissedRejectionIds] = useState<string[]>(() => {
@@ -289,8 +336,12 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       return [];
     }
   });
+  const [rejectionsExpanded, setRejectionsExpanded] = useState(false);
   const [showDelivery, setShowDelivery] = useState(false);
   const [delivery, setDelivery] = useState<DeliveryInfo>({});
+  const [orderReference, setOrderReference] = useState("");
+  // ponytail: fulfillment routing removed — will be per-line when needed
+  const [selectedDriverId, setSelectedDriverId] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [facilitatorMode, setFacilitatorMode] = useState<'none' | 'user' | 'name'>('none');
@@ -301,6 +352,11 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
   const [showFacilitatorSuggestions, setShowFacilitatorSuggestions] = useState(false);
 
   const { user } = useAuth();
+  const orgBrand = {
+    orgName: user?.organization?.name,
+    logoUrl: user?.organization?.logoUrl,
+    orgMeta: [user?.organization?.slug].filter(Boolean).join(" · ") || undefined,
+  };
   const userRoles = user?.roles ?? [];
   const canCreateBlackSale = userRoles.some((r) =>
     ["super_admin", "org_admin", "org_manager"].includes(r),
@@ -332,12 +388,14 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       debouncedCustomerInfo.trim().length >= 2 &&
       !customerId,
   });
-  const { data: selectedCustomer } = Customers.useGet(
+  const { data: selectedCustomer, refetch: refetchSelectedCustomer } = Customers.useGet(
     mode === "sales" && customerId ? customerId : undefined,
   );
+  const [customerDrawerOpen, setCustomerDrawerOpen] = useState(false);
   const { data: myRejected = [] } = CreditApprovals.useMyRejected(mode === "sales");
   const { data: typeRules = [] } = BillingSettings.useCustomerTypeRules();
   const { data: orgQuickCharges = [] } = BillingSettings.useQuickCharges({ enabled: true });
+  const { data: fleetDrivers = [] } = FleetDrivers.useList(mode === "sales");
 
   const rejectedNotices = useMemo(
     () => myRejected.filter((r) => !dismissedRejectionIds.includes(r.id)),
@@ -350,6 +408,15 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       sessionStorage.setItem("pos-dismissed-credit-rejections", JSON.stringify(next));
       return next;
     });
+  };
+
+  const dismissAllRejections = () => {
+    setDismissedRejectionIds((prev) => {
+      const next = [...new Set([...prev, ...rejectedNotices.map((r) => r.id)])];
+      sessionStorage.setItem("pos-dismissed-credit-rejections", JSON.stringify(next));
+      return next;
+    });
+    setRejectionsExpanded(false);
   };
 
   const { data: facilitatorSearch } = ClerkUsers.useSearch({
@@ -437,7 +504,9 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       }
     }
 
-    const listRate = productRate(p, mode);
+    const tiers = productTierPrices(p);
+    const tier = customerTypeToTier(customerType);
+    const listRate = tiers[tier];
     const rate =
       mode === "sales"
         ? discountedRate(listRate, effectiveDiscountPercent(selectedCustomer, customerType, typeRules))
@@ -463,6 +532,14 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
           taxPct: 0,
           unitLabel: p.unit || "pcs",
           officialRate: listRate,
+          p1: tiers.p1,
+          p2: tiers.p2,
+          p3: tiers.p3,
+          p4: tiers.p4,
+          activeTier: tier,
+          storeCode: stockLocation?.name?.slice(0, 1).toUpperCase(),
+          manufacturer: p.manufacturer,
+          packSize: p.packSize,
         },
       ]);
     }
@@ -481,11 +558,11 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     setLines((ls) =>
       ls.map((l) => {
         if (l.id !== lineId) return l;
-        let qty = Math.max(1, newQty);
+        let qty = Math.max(mode === "sales" ? 0.001 : 1, newQty);
         if (mode === "sales") {
           const stock = getStockInfo(stockMap, l.productId, saleType);
           const others = cartQtyForProduct(ls, l.productId, lineId);
-          const maxForLine = Math.max(1, stock.available - others);
+          const maxForLine = Math.max(0.001, stock.available - others);
           if (!stock.found) {
             toast.error("No stock record for this product at this location");
             return l;
@@ -504,6 +581,51 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     setLines((ls) => ls.map((l) => (l.id === lineId ? { ...l, rate } : l)));
   };
 
+  const handleTierSelect = (lineId: number, tier: PriceTier) => {
+    setLines((ls) =>
+      ls.map((l) => {
+        if (l.id !== lineId) return l;
+        const listRate = l[tier] ?? l.rate;
+        const rate = discountedRate(
+          listRate,
+          effectiveDiscountPercent(selectedCustomer, customerType, typeRules),
+        );
+        return { ...l, activeTier: tier, rate, officialRate: listRate };
+      }),
+    );
+  };
+
+  useEffect(() => {
+    if (mode !== "sales" || lines.length === 0) return;
+    const tier = customerTypeToTier(customerType);
+    setLines((ls) =>
+      ls.map((l) => {
+        const listRate = l[tier] ?? l.officialRate;
+        const rate = discountedRate(
+          listRate,
+          effectiveDiscountPercent(selectedCustomer, customerType, typeRules),
+        );
+        return { ...l, activeTier: tier, rate, officialRate: listRate };
+      }),
+    );
+  }, [customerType, selectedCustomer?.id, typeRules]);
+
+
+  const handleDriverSelect = (driverId: string) => {
+    setSelectedDriverId(driverId);
+    const d = fleetDrivers.find((x) => x.id === driverId);
+    if (d) {
+      setDelivery((prev) => ({
+        ...prev,
+        driverName: `${d.firstName} ${d.lastName}`.trim(),
+        license: d.licenseNumber,
+      }));
+      setShowDelivery(true);
+    } else {
+      setDelivery((prev) => ({ ...prev, driverName: undefined, license: undefined }));
+    }
+  };
+
   const addQuickCharge = (c: QuickChargeTile) => {
     setExtraCharges((ec) => [
       ...ec,
@@ -513,20 +635,26 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
   const removeCharge = (id: number) =>
     setExtraCharges((ec) => ec.filter((c) => c.id !== id));
 
-  const subtotal = lines.reduce((s, l) => s + l.qty * l.rate, 0);
-  const totalTax = lines.reduce((s, l) => s + (l.qty * l.rate * l.taxPct) / 100, 0);
+  const lineUnits = (l: typeof lines[0]) => mode === 'purchase' ? l.qty * (l.packSize ?? 1) : l.qty;
+  const subtotal = lines.reduce((s, l) => s + lineUnits(l) * l.rate, 0);
+  const totalTax = lines.reduce((s, l) => s + (lineUnits(l) * l.rate * l.taxPct) / 100, 0);
   const extraTotal = extraCharges.reduce((s, c) => s + c.amount, 0);
   const grandTotal = subtotal + totalTax + extraTotal;
   const blackMarkup = saleType === "black" ? lines.reduce((s, l) => s + (l.rate - l.officialRate) * l.qty, 0) : 0;
   const creditLimit = Number(selectedCustomer?.creditLimit ?? 0);
   const creditBalance = Number(selectedCustomer?.creditBalance ?? 0);
   const creditRemaining = creditLimit - creditBalance;
-  const creditNeedsApproval =
+  const skipOverLimitApproval = effectiveSkipOverLimitApproval(selectedCustomer, customerType, typeRules);
+  const creditOverLimit =
     saleType === "credit" &&
     !!customerId &&
     creditLimit > 0 &&
-    creditBalance + grandTotal > creditLimit &&
-    !effectiveSkipOverLimitApproval(selectedCustomer, customerType, typeRules);
+    creditBalance + grandTotal > creditLimit;
+  const creditNeedsApproval =
+    saleType === "credit" &&
+    !!customerId &&
+    creditSaleRequiresApproval(creditLimit, creditBalance, grandTotal, skipOverLimitApproval);
+  const creditOverLimitException = creditOverLimit && skipOverLimitApproval;
   const creditMissingCustomer = mode === "sales" && saleType === "credit" && !customerId;
   const creditMissingLimit =
     mode === "sales" &&
@@ -534,11 +662,21 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     !!customerId &&
     selectedCustomer != null &&
     (selectedCustomer.creditLimit == null || Number(selectedCustomer.creditLimit) <= 0);
-  const deliveryPayload: DeliveryInfo | undefined = showDelivery
-    ? Object.fromEntries(
-        Object.entries(delivery).filter(([, v]) => String(v ?? "").trim() !== ""),
-      )
-    : undefined;
+  const deliveryPayload: DeliveryInfo | undefined =
+    showDelivery || delivery.driverName || delivery.note
+      ? Object.fromEntries(
+          Object.entries(delivery).filter(([, v]) => String(v ?? "").trim() !== ""),
+        )
+      : undefined;
+
+  const fulfillmentStoreNames: string[] = [];
+
+  const listSubtotal = lines.reduce((s, l) => s + l.qty * (l.officialRate ?? l.rate), 0);
+  const discountAmount = Math.max(0, listSubtotal - subtotal);
+  const grandTotalWithBalance = grandTotal + (customerId ? creditBalance : 0);
+  const saleRef = activeDraftBillId
+    ? `DRAFT-${activeDraftBillId.slice(0, 8).toUpperCase()}`
+    : "SO-NEW";
 
   const voidBill = () => {
     setLines([]);
@@ -561,6 +699,8 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     setFacilitatorSearchVal("");
     setShowDelivery(false);
     setDelivery({});
+    setOrderReference("");
+    setSelectedDriverId("");
     setPrintDoc("receipt");
     setActiveDraftBillId(null);
   };
@@ -594,6 +734,7 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       qty: l.qty,
       unitPrice: l.rate,
       taxPct: l.taxPct,
+      packSize: mode === 'purchase' ? l.packSize : undefined,
     }));
 
   const generateBill = async () => {
@@ -635,9 +776,10 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
               facilitatorName: facilitatorMode === "name" ? facilitatorName : undefined,
               commissionPct: commissionPct ? Number(commissionPct) : undefined,
               existingBillId: activeDraftBillId ?? undefined,
+              orderReference: orderReference.trim() || undefined,
+              fulfillmentStores: fulfillmentStoreNames.length ? fulfillmentStoreNames : undefined,
             })
           : await runPurchaseCheckout({
-              locationId,
               storeName: stockLocation?.name,
               locationName: stockLocation?.name,
               inventory,
@@ -653,13 +795,18 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
 
       setCheckoutResult(result);
       if (result.primaryOk) {
+        const brandedReceipt = { ...result.receipt, ...orgBrand };
         setPrintDoc("receipt");
-        setLastReceipt(result.receipt);
+        setLastReceipt(brandedReceipt);
         setSuccess({
-          receipt: result.receipt,
+          receipt: brandedReceipt,
           steps: result.steps,
           pendingCreditApproval: result.pendingCreditApproval,
+          billId: result.billId,
         });
+        if (saleType === "credit" && customerId) {
+          void refetchSelectedCustomer();
+        }
       }
     } finally {
       setCheckingOut(false);
@@ -700,6 +847,8 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
         facilitatorName: facilitatorMode === "name" ? facilitatorName : undefined,
         commissionPct: commissionPct ? Number(commissionPct) : undefined,
         existingBillId: activeDraftBillId ?? undefined,
+        orderReference: orderReference.trim() || undefined,
+        fulfillmentStores: fulfillmentStoreNames.length ? fulfillmentStoreNames : undefined,
       });
       if (result.billId) {
         toast.success(`Sale held as draft — ${result.receipt.ref}`);
@@ -759,12 +908,38 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     }
   };
 
+  const resumeSaleRef = useRef(resumeSale);
+  resumeSaleRef.current = resumeSale;
+  const resumeBillId = searchParams.get("resumeBillId");
+  useEffect(() => {
+    if (mode !== "sales" || !resumeBillId) return;
+    let cancelled = false;
+    void resumeSaleRef.current(resumeBillId).finally(() => {
+      if (cancelled) return;
+      setSearchParams(
+        (prev) => {
+          if (!prev.get("resumeBillId")) return prev;
+          const next = new URLSearchParams(prev);
+          next.delete("resumeBillId");
+          return next;
+        },
+        { replace: true },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, resumeBillId, setSearchParams]);
+
   const handleCustomerSelect = (c: Customer) => {
     setCustomerId(c.id);
     setCustomerInfo(
       formatEntityLabel({ name: c.name, phone: c.phone, id: c.id }),
     );
     setCustomerType((c.customerType as CustomerType) || "regular");
+    if (c.creditLimit != null && Number(c.creditLimit) > 0) {
+      setSaleType("credit");
+    }
     setShowCustomerSuggestions(false);
   };
 
@@ -774,12 +949,20 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
       formatEntityLabel({ name: customer.name, phone: customer.phone, id: customer.id }),
     );
     setCustomerType((customer.customerType as CustomerType) || "new");
+    if (customer.creditLimit != null && Number(customer.creditLimit) > 0) {
+      setSaleType("credit");
+    }
     setShowCreateCustomer(false);
   };
 
   const handleClearCustomer = () => {
     setCustomerId("");
     setCustomerInfo("");
+  };
+
+  const handleNewSupplierCreated = (s: { id: string }) => {
+    setSupplierId(s.id);
+    setSupplierMode("old");
   };
 
   const handleCustomerInfoChange = (v: string) => {
@@ -819,6 +1002,20 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
     requestAnimationFrame(() => printReceipt());
   };
 
+  const shareToDriver = () => {
+    const driver = fleetDrivers.find((d) => d.id === selectedDriverId);
+    if (!driver?.phone) {
+      toast.error("Select a driver with a phone number");
+      return;
+    }
+    const receipt = success?.receipt ?? lastReceipt;
+    const text = receipt
+      ? `Delivery for ${receipt.ref} — Total ${receipt.totalAmount.toFixed(2)}`
+      : "New delivery assignment";
+    const phone = driver.phone.replace(/\D/g, "");
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
   const generateDisabled =
     lines.length === 0 ||
     checkingOut ||
@@ -836,174 +1033,276 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
   return (
     <div className={`flex h-full min-h-0 flex-col overflow-hidden bg-muted ${modeShellCls}`}>
       {mode === "sales" && rejectedNotices.length > 0 && (
-        <div className="pos-no-print flex-shrink-0 space-y-2 border-b border-amber-300/60 bg-amber-500/15 px-4 py-2">
-          {rejectedNotices.map((req) => {
-            const billNo = req.bill?.billNumber || req.billId.slice(0, 8);
-            return (
-              <div
-                key={req.id}
-                className="flex flex-wrap items-center justify-between gap-2 text-sm text-amber-950 dark:text-amber-100"
+        <div className="pos-no-print flex-shrink-0 border-b border-amber-200/80 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+            <p className="text-sm font-medium text-amber-950 dark:text-amber-100">
+              {rejectedNotices.length === 1
+                ? "1 credit sale was rejected"
+                : `${rejectedNotices.length} credit sales were rejected`}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-amber-700/30 bg-white/70 px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-white dark:bg-amber-900/40 dark:text-amber-100 dark:hover:bg-amber-900/70"
+                onClick={() => setRejectionsExpanded((v) => !v)}
               >
-                <p className="font-medium">
-                  Credit sale <span className="font-mono">{billNo}</span> was rejected.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg bg-amber-700 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-800"
-                    onClick={() => {
-                      dismissRejection(req.id);
-                      void resumeSale(req.billId);
-                    }}
+                {rejectionsExpanded ? "Hide" : "Review"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-amber-700/30 px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-500/15 dark:text-amber-200"
+                onClick={dismissAllRejections}
+              >
+                Dismiss all
+              </button>
+            </div>
+          </div>
+          {rejectionsExpanded && (
+            <div className="max-h-40 space-y-1.5 overflow-y-auto border-t border-amber-200/60 px-4 py-2 dark:border-amber-800/40">
+              {rejectedNotices.map((req) => {
+                const billNo = req.bill?.billNumber || req.billId.slice(0, 8);
+                return (
+                  <div
+                    key={req.id}
+                    className="flex flex-wrap items-center justify-between gap-2 text-sm text-amber-950 dark:text-amber-100"
                   >
-                    Resume
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-amber-700/40 px-3 py-1 text-xs font-semibold hover:bg-amber-500/20"
-                    onClick={() => dismissRejection(req.id)}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                    <p className="font-mono text-xs font-medium">{billNo}</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-amber-700 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-800"
+                        onClick={() => {
+                          dismissRejection(req.id);
+                          void resumeSale(req.billId);
+                        }}
+                      >
+                        Resume
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-amber-700/40 px-3 py-1 text-xs font-semibold hover:bg-amber-500/20"
+                        onClick={() => dismissRejection(req.id)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
-      <PosToolbar
-        mode={mode}
-        saleType={saleType}
-        onSaleTypeChange={setSaleType}
-        canCreateBlackSale={canCreateBlackSale}
-        locations={locations}
-        locationsLoading={locationsLoading}
-        locationId={locationId}
-        onLocationChange={setLocationId}
-        stockLocation={stockLocation}
-        payMethod={payMethod}
-        onPayMethodChange={setPayMethod}
-        paymentTiming={paymentTiming}
-        onPaymentTimingChange={setPaymentTiming}
-        customerType={customerType}
-        onCustomerTypeChange={setCustomerType}
-        badgeCls={accentCls.badge}
-      />
+      {mode === "sales" ? (
+        <>
+          <SalesOrderHeader
+            onHoldSale={() => void holdSale()}
+            holding={holding}
+            holdDisabled={holdDisabled}
+            onShowHeldSales={() => setShowHeldSales(true)}
+            onCompleteSale={() => void generateBill()}
+            generateDisabled={generateDisabled}
+            checkingOut={checkingOut}
+          />
 
-      <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
-        <ProductSearchPanel
-          mode={mode}
-          saleType={saleType}
-          getStockInfo={getProductStock}
-          searchRef={searchRef}
-          searchVal={searchVal}
-          onSearchChange={setSearchVal}
-          onEnter={handleAddBtn}
-          suggestions={suggestions}
-          onAddProduct={addProduct}
-          onAddBtn={handleAddBtn}
-          onAddQuickCharge={addQuickCharge}
-          quickCharges={orgQuickCharges.map((c) => ({ label: c.label, amount: c.amount }))}
-          supplierId={supplierId}
-          onSupplierChange={setSupplierId}
-          suppliers={suppliers}
-          accentBtnCls={accentCls.btn}
-        />
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <CustomerInfoSection
+                saleRef={saleRef}
+                orderReference={orderReference}
+                onOrderReferenceChange={setOrderReference}
+                customerInfo={customerInfo}
+                onCustomerInfoChange={handleCustomerInfoChange}
+                customerId={customerId}
+                onCustomerSelect={handleCustomerSelect}
+                onClearCustomer={handleClearCustomer}
+                selectedCustomer={selectedCustomer}
+                customerType={customerType}
+                onCustomerTypeChange={setCustomerType}
+                saleType={saleType}
+                onSaleTypeChange={setSaleType}
+                canCreateBlackSale={canCreateBlackSale}
+                creditBalance={creditBalance}
+                billedBy={`${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() || user?.email || "Admin"}
+                transactionDate={transactionDate}
+                onTransactionDateChange={setTransactionDate}
+                locations={locations}
+                locationId={locationId}
+                onLocationChange={setLocationId}
+              />
 
-        <CartTable
-          mode={mode}
-          saleType={saleType}
-          getStockInfo={getProductStock}
-          lineOverStock={lineOverStock}
-          hasStockIssues={hasStockIssues}
-          lines={lines}
-          extraCharges={extraCharges}
-          onQtyChange={handleLineQtyChange}
-          onRateChange={handleRateChange}
-          onRemoveLine={removeLine}
-          onRemoveCharge={removeCharge}
-          onVoidBill={voidBill}
-          onHoldSale={() => void holdSale()}
-          holding={holding}
-          holdDisabled={holdDisabled}
-          onShowHeldSales={() => setShowHeldSales(true)}
-          checkoutResult={checkoutResult}
-          showCheckoutFailureBanner={!!checkoutResult && !success}
-          accentBadgeCls={accentCls.badge}
-        />
+              <ProductDetailsSection
+                saleType={saleType}
+                searchRef={searchRef}
+                searchVal={searchVal}
+                onSearchChange={setSearchVal}
+                onEnter={handleAddBtn}
+                suggestions={suggestions}
+                onAddProduct={addProduct}
+                getStockInfo={getProductStock}
+                lineOverStock={lineOverStock}
+                hasStockIssues={hasStockIssues}
+                lines={lines}
+                extraCharges={extraCharges}
+                onQtyChange={handleLineQtyChange}
+                onRateChange={handleRateChange}
+                onRemoveLine={removeLine}
+                onRemoveCharge={removeCharge}
+                storeCode={stockLocation?.name?.slice(0, 1).toUpperCase()}
+                checkoutResult={checkoutResult}
+                showCheckoutFailureBanner={!!checkoutResult && !success}
+              />
 
-        <CheckoutPanel
-          mode={mode}
-          saleType={saleType}
-          lineCount={lines.length}
-          subtotal={subtotal}
-          totalTax={totalTax}
-          extraTotal={extraTotal}
-          grandTotal={grandTotal}
-          blackMarkup={blackMarkup}
-          payMethod={payMethod}
-          cashTendered={cashTendered}
-          onCashTenderedChange={setCashTendered}
-          paymentReference={paymentReference}
-          onPaymentReferenceChange={setPaymentReference}
-          paymentTiming={paymentTiming}
-          partialAmount={partialAmount}
-          onPartialAmountChange={setPartialAmount}
-          partialAmountMissing={partialAmountMissing}
-          showDelivery={showDelivery}
-          onToggleDelivery={() => setShowDelivery((v) => !v)}
-          delivery={delivery}
-          onDeliveryChange={setDelivery}
-          customerInfo={customerInfo}
-          onCustomerInfoChange={handleCustomerInfoChange}
-          customerId={customerId}
-          onCustomerSelect={handleCustomerSelect}
-          onClearCustomer={handleClearCustomer}
-          showCustomerSuggestions={showCustomerSuggestions}
-          onShowCustomerSuggestions={setShowCustomerSuggestions}
-          debouncedCustomerInfo={debouncedCustomerInfo}
-          customerSearchItems={customerSearch?.items ?? []}
-          showCreateCustomer={showCreateCustomer}
-          onOpenCreateCustomer={() => {
-            setShowCreateCustomer(true);
-            setShowCustomerSuggestions(false);
-          }}
-          onCloseCreateCustomer={() => setShowCreateCustomer(false)}
-          onCustomerCreated={handleCustomerCreated}
-          selectedCustomer={selectedCustomer}
-          customerType={customerType}
-          creditLimit={creditLimit}
-          creditBalance={creditBalance}
-          creditRemaining={creditRemaining}
-          creditNeedsApproval={creditNeedsApproval}
-          creditMissingLimit={creditMissingLimit}
-          facilitatorMode={facilitatorMode}
-          onFacilitatorModeChange={setFacilitatorMode}
-          facilitatorSearchVal={facilitatorSearchVal}
-          onFacilitatorSearchChange={(v) => {
-            setFacilitatorSearchVal(v);
-            setFacilitatorUserId("");
-          }}
-          facilitatorUserId={facilitatorUserId}
-          onFacilitatorUserSelect={handleFacilitatorUserSelect}
-          showFacilitatorSuggestions={showFacilitatorSuggestions}
-          onShowFacilitatorSuggestions={setShowFacilitatorSuggestions}
-          facilitatorSearchResults={facilitatorSearch?.data ?? []}
-          facilitatorName={facilitatorName}
-          onFacilitatorNameChange={setFacilitatorName}
-          commissionPct={commissionPct}
-          onCommissionPctChange={setCommissionPct}
-          supplierRef={supplierRef}
-          onSupplierRefChange={setSupplierRef}
-          onGenerateBill={() => void generateBill()}
-          generateDisabled={generateDisabled}
-          checkingOut={checkingOut}
-          onPrintReceipt={printReceipt}
-          hasReceipt={!!lastReceipt || !!success}
-          hasStockIssues={hasStockIssues}
-          accentBtnCls={accentCls.btn}
-        />
-      </div>
+              <PaymentLogisticsSection
+                paymentReference={paymentReference}
+                onPaymentReferenceChange={setPaymentReference}
+                paymentTiming={paymentTiming}
+                onPaymentTimingChange={setPaymentTiming}
+                partialAmount={partialAmount}
+                onPartialAmountChange={setPartialAmount}
+                partialAmountMissing={partialAmountMissing}
+                notes={delivery.note ?? ""}
+                onNotesChange={(note) => {
+                  setDelivery((d) => ({ ...d, note }));
+                  setShowDelivery(true);
+                }}
+                drivers={fleetDrivers}
+                selectedDriverId={selectedDriverId}
+                onDriverSelect={handleDriverSelect}
+                delivery={delivery}
+                onDeliveryChange={(d) => {
+                  setDelivery(d);
+                  setShowDelivery(true);
+                }}
+                saleType={saleType}
+                blackMarkup={blackMarkup}
+                facilitatorMode={facilitatorMode}
+                onFacilitatorModeChange={setFacilitatorMode}
+                facilitatorName={facilitatorName}
+                onFacilitatorNameChange={setFacilitatorName}
+                commissionPct={commissionPct}
+                onCommissionPctChange={setCommissionPct}
+              />
+            </div>
+
+            <OrderSummarySidebar
+              subtotal={subtotal}
+              totalTax={totalTax}
+              extraTotal={extraTotal}
+              discountAmount={discountAmount}
+              previousBalance={customerId ? creditBalance : 0}
+              grandTotal={grandTotal}
+              payMethod={payMethod}
+              onPayMethodChange={setPayMethod}
+              cashTendered={cashTendered}
+              onCashTenderedChange={setCashTendered}
+              grandTotalWithBalance={grandTotalWithBalance}
+              saleType={saleType}
+              creditNeedsApproval={creditNeedsApproval}
+              creditOverLimitException={creditOverLimitException}
+              creditMissingCustomer={creditMissingCustomer}
+              creditMissingLimit={creditMissingLimit}
+              hasStockIssues={hasStockIssues}
+              generateDisabled={generateDisabled}
+              checkingOut={checkingOut}
+              onCompleteSale={() => void generateBill()}
+              onPrintBill={() => handlePrintDoc("receipt")}
+              onDeliveryNote={() => handlePrintDoc("delivery")}
+              onShareToDriver={shareToDriver}
+              hasReceipt={!!lastReceipt || !!success}
+              hasDriver={!!selectedDriverId}
+            />
+          </div>
+        </>
+      ) : (
+        /* ── Purchase screen — form-based redesign ── */
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <PurchaseOrderHeader
+            onCancel={voidBill}
+            onSubmit={() => void generateBill()}
+            generateDisabled={generateDisabled}
+            checkingOut={checkingOut}
+          />
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Row 1: Document Details + Supplier Info */}
+            <div className="grid grid-cols-2 gap-4">
+              <PurchaseDocumentDetails
+                supplierMode={supplierMode}
+                onSupplierModeChange={setSupplierMode}
+                purchaseDate={purchaseDate}
+                onPurchaseDateChange={setPurchaseDate}
+                supplierRef={supplierRef}
+                onSupplierRefChange={setSupplierRef}
+                billedBy={`${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim() || user?.email || "Admin"}
+              />
+
+              <PurchaseSupplierInfo
+                supplierMode={supplierMode}
+                suppliers={suppliers}
+                supplierId={supplierId}
+                onSupplierChange={setSupplierId}
+                selectedSupplier={suppliers.find((s) => s.id === supplierId)}
+                onNewSupplierCreated={handleNewSupplierCreated}
+              />
+            </div>
+
+            {/* Row 2: Line Items */}
+            <PurchaseLineItems
+              searchRef={searchRef}
+              searchVal={searchVal}
+              onSearchChange={setSearchVal}
+              onEnter={handleAddBtn}
+              suggestions={suggestions}
+              onAddProduct={addProduct}
+              lines={lines}
+              extraCharges={extraCharges}
+              onQtyChange={handleLineQtyChange}
+              onRateChange={handleRateChange}
+              onRemoveLine={removeLine}
+              onRemoveCharge={removeCharge}
+              checkoutResult={checkoutResult}
+              showCheckoutFailureBanner={!!checkoutResult && !success}
+            />
+
+            {/* Row 3: Stock Information + Payment Summary */}
+            <PurchaseStockPayment
+              stockNotes={stockNotes}
+              onStockNotesChange={setStockNotes}
+              subtotal={subtotal}
+              totalTax={totalTax}
+              grandTotal={grandTotal}
+              payMethod={payMethod}
+              onPayMethodChange={setPayMethod}
+              cashTendered={cashTendered}
+              onCashTenderedChange={setCashTendered}
+              generateDisabled={generateDisabled}
+              checkingOut={checkingOut}
+              onSubmit={() => void generateBill()}
+              onCancel={voidBill}
+            />
+          </div>
+
+          {/* Footer action bar */}
+          <div className="flex flex-shrink-0 items-center justify-end gap-3 border-t border-border bg-card px-6 py-3">
+            <button
+              type="button"
+              onClick={voidBill}
+              className="rounded-lg border border-border px-5 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={generateDisabled}
+              onClick={() => void generateBill()}
+              className="rounded-lg bg-orange-500 px-6 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {checkingOut ? "Processing…" : "Submit Transaction"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {success && (
         <BillSuccessModal
@@ -1013,6 +1312,9 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
           onPrintDoc={handlePrintDoc}
           onClose={closeSuccess}
           pendingCreditApproval={success.pendingCreditApproval}
+          creditBalanceAfter={success.receipt.saleType === 'credit' ? selectedCustomer?.creditBalance : undefined}
+          creditLimit={success.receipt.saleType === 'credit' ? selectedCustomer?.creditLimit ?? undefined : undefined}
+          billId={success.billId}
         />
       )}
 
@@ -1032,6 +1334,15 @@ export default function POSTerminal({ mode }: { mode: Mode }) {
         <HeldSalesPanel
           onClose={() => setShowHeldSales(false)}
           onResume={(bill) => void resumeSale(bill.id)}
+        />
+      )}
+
+      {customerId && (
+        <CustomerDetailDrawer
+          customerId={customerId}
+          open={customerDrawerOpen}
+          onClose={() => setCustomerDrawerOpen(false)}
+          onCreditUpdated={() => void refetchSelectedCustomer()}
         />
       )}
     </div>
